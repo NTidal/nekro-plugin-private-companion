@@ -172,27 +172,147 @@ def private_chat_key(user_id: str) -> str:
 # ============ 人设解析 ============
 
 
-async def get_persona_prompt() -> str:
-    """陪伴人格：自定义文本 > 选中人设 > 系统默认人设 > 空"""
-    cfg = get_config()
-    if cfg.PERSONA_PROMPT.strip():
-        return cfg.PERSONA_PROMPT.strip()
-    try:
-        from nekro_agent.models.db_preset import DBPreset
+# ===== 世界观舞台 =====
+# 日程/梦境/日记必须发生在角色所属世界的语境里。
+# 实测问题：不加约束时 LLM 会写成现代中国都市生活
+# （挤城铁去邻市找同学、地铁口碰头、快递丢了、被拉去加班、窝着刷手机）。
+#
+# 文本放插件数据目录（plugin_data/xiaojiu.private_companion/world_stage.txt），
+# 不写死在源码里 —— 换角色只换数据文件，升级插件时可整包覆盖源码。
+# 数据文件不存在时返回空串，等同上游原版行为（不加世界观约束）。
+_WORLD_STAGE_REL = ("plugin_data", "xiaojiu.private_companion", "world_stage.txt")
+_WORLD_STAGE_CACHE: Dict[str, object] = {"key": None, "text": ""}
+WORLD_STAGE = ""  # 兼容旧取值；新代码请用 load_world_stage()
 
-        pid = str(cfg.PERSONA_PRESET_ID).strip()
-        if pid.isdigit():
-            preset = await DBPreset.get_or_none(id=int(pid))
-            if preset and preset.content:
-                return str(preset.content)
-        default_id = getattr(core_config, "AI_CHAT_DEFAULT_PRESET_ID", None)
-        if default_id:
-            preset = await DBPreset.get_or_none(id=default_id)
-            if preset and preset.content:
-                return str(preset.content)
-    except Exception as e:
-        logger.warning(f"[private_companion] 读取人设失败: {e!r}")
-    return ""
+
+def world_stage_path() -> "Path":
+    """世界观文本的数据文件路径。"""
+    from pathlib import Path
+
+    from nekro_agent.core.os_env import OsEnv
+
+    return Path(OsEnv.DATA_DIR).joinpath(*_WORLD_STAGE_REL)
+
+
+def load_world_stage() -> str:
+    """读取世界观舞台文本；按 (mtime, size) 缓存；文件不存在则返回空串。"""
+    global WORLD_STAGE
+    try:
+        fp = world_stage_path()
+        if not fp.is_file():
+            _WORLD_STAGE_CACHE["key"] = None
+            _WORLD_STAGE_CACHE["text"] = ""
+            WORLD_STAGE = ""
+            return ""
+        stat = fp.stat()
+        key = (stat.st_mtime, stat.st_size)
+        if _WORLD_STAGE_CACHE.get("key") == key:
+            return str(_WORLD_STAGE_CACHE.get("text") or "")
+        text = fp.read_text(encoding="utf-8").strip()
+        _WORLD_STAGE_CACHE["key"] = key
+        _WORLD_STAGE_CACHE["text"] = text
+        WORLD_STAGE = text
+        return text
+    except Exception:  # noqa: BLE001
+        logger.exception("[companion] 读取 world_stage.txt 失败，按空处理")
+        return ""
+
+
+def save_world_stage(text: str) -> str:
+    """原子写入世界观舞台文本，并刷新缓存；返回落盘路径。"""
+    global WORLD_STAGE
+    text = str(text or "").strip()
+    if not text:
+        raise ValueError("世界观文本不能为空")
+    fp = world_stage_path()
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = fp.with_name(fp.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(fp)
+    stat = fp.stat()
+    _WORLD_STAGE_CACHE["key"] = (stat.st_mtime, stat.st_size)
+    _WORLD_STAGE_CACHE["text"] = text
+    WORLD_STAGE = text
+    return str(fp)
+
+
+def world_stage_block() -> str:
+    """渲染为可追加到 system_prompt 的世界观约束段；无内容时返回空串。"""
+    ws = load_world_stage()
+    if not ws:
+        return ""
+    return "\n\n【世界观（必须严格遵守，不得出现世界外元素）】\n" + ws
+
+
+# ===== 背景记忆（本地补丁 NTidal）=====
+# 生成日程/梦境/日记时带上 nekro_persona 插件的 1 档背景记忆，
+# 避免生成与角色设定冲突的生活线（实测曾生成"长途夜车/候车厅/小旅馆/上班族"）。
+# 直接读文件、不 import 对方插件，保持解耦；按 mtime 缓存。
+_BG_MEM_CACHE: Dict[str, object] = {"key": None, "text": ""}
+_BG_TIER1_REL = "plugins/workdir/nekro_persona/backgrounds/tier1/core.json"
+
+
+def get_background_memory() -> str:
+    """读取 1 档背景记忆并渲染为紧凑文本块；读不到返回空串。"""
+    try:
+        from pathlib import Path
+
+        from nekro_agent.core.os_env import OsEnv
+
+        fp = Path(OsEnv.DATA_DIR) / _BG_TIER1_REL
+        if not fp.is_file():
+            return ""
+        mtime = fp.stat().st_mtime
+        if _BG_MEM_CACHE.get("key") == mtime:
+            return str(_BG_MEM_CACHE.get("text") or "")
+        data = json.loads(fp.read_text(encoding="utf-8"))
+        lines = []
+        for item in data.get("entries") or []:
+            if not isinstance(item, dict) or not item.get("enabled", True):
+                continue
+            content = str(item.get("content") or "").strip()
+            if content:
+                lines.append(f"- {content}")
+        text = ""
+        if lines:
+            text = (
+                "\n\n## 附：她的背景事实（生成生活线时必须与这些一致，不得矛盾）\n"
+                "**这些是她的过去与底色，不是今天的情绪基调。**"
+                "她照常上课、写代码、排练、跟人斗嘴；"
+                "生成日程时不要把这些往事当成今天的氛围，今天依然可以有轻快、无聊、好笑的段落。\n"
+                + "\n".join(lines)
+            )
+        _BG_MEM_CACHE.update(key=mtime, text=text)
+        return text
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[private_companion] 读取背景记忆失败: {e!r}")
+        return ""
+
+
+async def get_persona_prompt() -> str:
+    """陪伴人格：自定义文本 > 选中人设 > 系统默认人设 > 空；末尾追加背景记忆。"""
+    cfg = get_config()
+    base = ""
+    if cfg.PERSONA_PROMPT.strip():
+        base = cfg.PERSONA_PROMPT.strip()
+    else:
+        try:
+            from nekro_agent.models.db_preset import DBPreset
+
+            pid = str(cfg.PERSONA_PRESET_ID).strip()
+            if pid.isdigit():
+                preset = await DBPreset.get_or_none(id=int(pid))
+                if preset and preset.content:
+                    base = str(preset.content)
+            if not base:
+                default_id = getattr(core_config, "AI_CHAT_DEFAULT_PRESET_ID", None)
+                if default_id:
+                    preset = await DBPreset.get_or_none(id=default_id)
+                    if preset and preset.content:
+                        base = str(preset.content)
+        except Exception as e:
+            logger.warning(f"[private_companion] 读取人设失败: {e!r}")
+    return base + get_background_memory()
 
 
 # ============ token 预算 ============

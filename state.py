@@ -1,9 +1,11 @@
-"""生活状态机：每日日程 / 能量心情 / 梦境 / 日记
+"""生活状态机：每日日程 / 能量心情 / 梦境
 
 借鉴 astrbot_plugin_private_companion 的提示词设计精华（具体可感、不要 AI 腔、
 日程区分工作日/休息日、梦从生活碎片里长出来），但只保留精简骨架：
-- 每天首次活动时跨天滚动：补写昨日日记 -> 生成昨夜梦境 -> 生成今日日程 -> 生成今日状态
-- 状态衰减与日记定时由调度器 tick 驱动，纯本地计算不耗 token
+- 每天首次活动时跨天滚动：生成昨夜梦境 -> 生成今日日程 -> 生成今日状态
+- 状态衰减由调度器 tick 驱动，纯本地计算不耗 token
+
+本地精简（NTidal）：已移除日记生成与定时日记。
 """
 
 import asyncio
@@ -20,6 +22,7 @@ from . import plan_diversity as pd
 from .core import (
     get_bot_state,
     get_persona_prompt,
+    world_stage_block,
     hhmm_now,
     llm_call,
     now_ts,
@@ -30,14 +33,6 @@ from .core import (
     today_key,
 )
 from .plugin import get_config, plugin
-
-_after_daily_plan_hooks: list = []
-
-
-def register_after_daily_plan(fn) -> None:
-    """注册日程生成完成后的回调（fn 接收 plan dict，async 或 sync 均可）"""
-    _after_daily_plan_hooks.append(fn)
-
 
 # ============ 节假日工具 ============
 
@@ -129,33 +124,18 @@ def _single_line(text, limit: int = 100) -> str:
     return " ".join(str(text or "").split())[:limit]
 
 
-def _yesterday_diary(bot_state: dict) -> Optional[dict]:
-    """最近一篇非今天的日记（通常就是昨天的）"""
-    for diary in bot_state.get("diaries", []):
-        if isinstance(diary, dict) and diary.get("date") and diary.get("date") != today_key():
-            return diary
-    return None
-
-
-def _diary_of(bot_state: dict, date_key: str) -> Optional[dict]:
-    for diary in bot_state.get("diaries", []):
-        if isinstance(diary, dict) and diary.get("date") == date_key:
-            return diary
-    return None
-
-
 # ============ 兜底数据 ============
 
 # 通用居家日程（LLM 失败时使用）
 _FALLBACK_PLAN_EVENTS: List[dict] = [
     {"window": "00:00-08:00", "activity": "睡觉", "mood": "安稳"},
-    {"window": "08:00-09:30", "activity": "醒来后赖了一会儿床，起来洗漱、慢慢吃早饭", "mood": "迷糊,刚开机"},
-    {"window": "09:30-12:00", "activity": "在家处理自己手头的事，中途起来倒了杯水", "mood": "平稳"},
-    {"window": "12:00-13:30", "activity": "做点简单的午饭，吃完靠在沙发上午休", "mood": "放松"},
+    {"window": "08:00-09:30", "activity": "醒来后赖了一会儿床，起来洗漱，去食堂慢慢吃了早饭", "mood": "迷糊,刚开机"},
+    {"window": "09:30-12:00", "activity": "在宿舍处理自己手头的事，中途起来倒了杯水", "mood": "平稳"},
+    {"window": "12:00-13:30", "activity": "去食堂吃了午饭，回来靠在床边歇了一会儿", "mood": "放松"},
     {"window": "13:30-17:30", "activity": "继续做事，下午有点犯困，泡了杯茶提神", "mood": "专注,偶尔走神"},
-    {"window": "17:30-19:30", "activity": "晚饭，顺手把屋子收拾了一下", "mood": "松弛"},
-    {"window": "19:30-23:00", "activity": "窝着刷手机、看看视频，自由时间", "mood": "惬意"},
-    {"window": "23:00-00:00", "activity": "洗漱，躺下前又刷了会儿手机才睡", "mood": "困意上来"},
+    {"window": "17:30-19:30", "activity": "晚饭，顺手把宿舍收拾了一下", "mood": "松弛"},
+    {"window": "19:30-23:00", "activity": "窝着用终端翻东西、听曲子，自由时间", "mood": "惬意"},
+    {"window": "23:00-00:00", "activity": "洗漱，躺下前又看了会儿终端才睡", "mood": "困意上来"},
 ]
 
 _FALLBACK_DREAM = {"content": "", "mood": "平静", "afterglow": ""}
@@ -180,7 +160,7 @@ _NEGATIVE_MOOD_HINTS = ("低落", "疲惫", "恍惚", "不安", "慌", "闷", "�
 
 
 async def ensure_daily_state() -> dict:
-    """确保 bot_state 是今天的；跨天时补日记 -> 生成梦境/日程/状态。
+    """确保 bot_state 是今天的；跨天时生成梦境 -> 日程 -> 状态。
 
     全程不抛异常：任何一步 LLM 失败都有内置兜底数据。
     """
@@ -194,14 +174,11 @@ async def ensure_daily_state() -> dict:
             return bot_state
         old_date = str(bot_state.get("date") or "")
         try:
-            # 1. 昨天有数据但还没写日记 -> 先补写（此时 bot_state 仍是昨日的日程/状态/梦境）
-            if old_date and not _diary_of(bot_state, old_date):
-                await generate_diary(date_key=old_date)
-            # 2. 昨夜梦境（素材来自昨日日记/日程，须在日程被覆盖前生成）
+            # 1. 昨夜梦境（素材来自昨日日程，须在日程被覆盖前生成）
             await generate_dream()
-            # 3. 今日日程
+            # 2. 今日日程
             await generate_daily_plan(force=True)
-            # 4. 今日初始状态
+            # 3. 今日初始状态
             await generate_today_state(force=True)
         except Exception as e:
             logger.error(f"[private_companion] 跨天生成异常: {e!r}")
@@ -239,16 +216,70 @@ def _events_from_plan_payload(payload: dict) -> list:
     return events
 
 
-async def generate_daily_plan(force: bool = False) -> dict:
-    """LLM 生成今日日程；失败兜底为通用居家日程"""
+def resolve_plan_segments(
+    min_segments: Optional[int] = None,
+    max_segments: Optional[int] = None,
+) -> Tuple[int, int]:
+    """解析日程时段数范围（下限, 上限）。
+
+    优先级：显式传入（WebUI 临时覆盖）> 插件配置；做范围钳制并保证上限 >= 下限。
+    """
+    cfg = get_config()
+
+    def _clamp(v, default, lo, hi):
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    lo = _clamp(min_segments if min_segments is not None else getattr(cfg, "PLAN_MIN_SEGMENTS", 5), 5, 3, 16)
+    hi = _clamp(max_segments if max_segments is not None else getattr(cfg, "PLAN_MAX_SEGMENTS", 8), 8, 3, 20)
+    if hi < lo:
+        hi = lo
+    return lo, hi
+
+
+def _segment_granularity_hint(lo: int, hi: int) -> str:
+    """根据段数给出切分粒度提示（本地补丁 NTidal：强调段长不必相等）
+
+    实测问题：原提示只约束段数，模型就按 24÷段数 均分出等长时段
+    （12 段 → 全是 120 分钟，连睡眠都被切成 2 小时一块）。
+    真实的一天长短混杂，故此处显式要求段长不等。
+    """
+    avg_hours = 24.0 / max(1, (lo + hi) / 2)
+    if avg_hours <= 1.8:
+        daytime = "白天用 0.5-1.5 小时的小段，每段写清一个具体动作"
+    elif avg_hours <= 2.6:
+        daytime = "白天用 1-2 小时一段"
+    elif avg_hours >= 4.5:
+        daytime = "白天每段约 4-6 小时，一段里连续做一类事"
+    else:
+        daytime = "白天每段 2-4 小时，一段里连续做一类事"
+    return (
+        "**段长必须不等长，不要按 24÷段数 均分**："
+        "睡眠段通常一整块 5-8 小时（不要拆成几块），刚醒和睡前可以各有一小段；"
+        f"{daytime}；同一件事的连续阶段可以合并成一段。"
+        "也不要为了凑段数写空洞的过渡段。"
+    )
+
+
+async def generate_daily_plan(
+    force: bool = False,
+    min_segments: Optional[int] = None,
+    max_segments: Optional[int] = None,
+) -> dict:
+    """LLM 生成今日日程；失败兜底为通用居家日程。
+
+    min_segments/max_segments 可临时覆盖配置的日程时段数范围（WebUI 重生成时使用）。
+    """
     cfg = get_config()
     bot_state = await get_bot_state()
     if not force and bot_state.get("date") == today_key() and bot_state.get("plan", {}).get("events"):
         return bot_state["plan"]
+    seg_lo, seg_hi = resolve_plan_segments(min_segments, max_segments)
 
     persona = await get_persona_prompt()
-    yesterday = _yesterday_diary(bot_state)
-    diary_hint = _single_line(yesterday.get("content"), 120) if yesterday else ""
     dream = bot_state.get("dream", {})
     dream_mood = _single_line(dream.get("mood"), 20) if dream.get("date") == today_key() else ""
 
@@ -273,26 +304,27 @@ async def generate_daily_plan(force: bool = False) -> dict:
         "你是一个拟人化 AI 的「生活日程生成器」。你要为下面这个角色安排今天一整天的真实生活，"
         "让她像一个真实存在的人在过日子，而不是在执行模板。\n"
         f"【角色设定】\n{persona or '（无明确设定，按一个作息规律、生活平淡温和的普通人来写）'}"
+        + world_stage_block()
     )
     prompt = f"""请为这个角色生成今天的生活日程。
 
 【今天的信息】
 日期：{_get_day_context()}
 {f'日程风格提示：{cfg.PLAN_STYLE_HINT}' if cfg.PLAN_STYLE_HINT.strip() else ''}
-{f'昨天日记摘要（顺势衔接，别照抄）：{diary_hint}' if diary_hint else ''}
 {f'今早醒来的情绪（让上午的节奏受它一点影响）：{dream_mood}' if dream_mood else ''}
 {card_block}
 {avoid if avoid else ''}
 禁止把今天写成上课+写代码的模板日；若场景不是学习/上班，就不要硬塞上课开会。
 
 【要求】
-1. 安排 5-8 个时间段，覆盖完整 24 小时（包括睡眠段），window 用 HH:MM-HH:MM，前后衔接不留大空洞。
+1. 安排 {seg_lo}-{seg_hi} 个时间段（**段长不必相等**），覆盖完整 24 小时（包括睡眠段），window 用 HH:MM-HH:MM，前后衔接不留大空洞。{_segment_granularity_hint(seg_lo, seg_hi)}
 2. 先判断今天是工作/学习日还是休息日：周末或节假日不要安排上课、上班、开会这类工作日主线（除非设定明确要求）。
 3. activity 写得具体、生活化：写「午休后靠着桌沿醒神」而不是「休息」，写「出门买饮料顺便走了一段」而不是「外出活动」。每段是一小段连续的生活，不是一个几秒钟的动作，也不是任务标签。
 4. 允许平淡、磨蹭和「没发生什么」，朴素的安排反而可信；可以自然埋 1 个不起眼的小意外或小惊喜，但别喧宾夺主。
-5. mood 用 1-3 个简短中文词，写真实的感受或身体状态（如「慵懒,不想动」「认真,有点卡」），别只写一个笼统词。
+5. mood 用 1-3 个简短中文词，写真实的感受或身体状态（如「轻快,想出门」「平静,专注」「慵懒,不想动」——正面、中性、负面都可以），别只写一个笼统词。
 6. summary 是一句话概括今天的整体基调，口语化，别写成总结报告。
 7. 不要 AI 腔、不要漂亮但空的句子，先有看得见的动作和场景，情绪贴在上面。
+8. **情绪要有起伏**：一天里至少 2-3 段是轻松、愉快或满足的。她底色偏安静，但不是全天难过——真实的一天有烦也有乐，不要把每一段都写成恍惚、走神、发闷、没力气。
 
 只输出纯 JSON，不要 Markdown，不要解释：
 {{"summary": "一句话概括今天", "events": [{{"window": "09:00-11:30", "activity": "具体在做什么", "mood": "心情"}}]}}"""
@@ -308,7 +340,7 @@ async def generate_daily_plan(force: bool = False) -> dict:
             return None
         return {
             "summary": _single_line(payload.get("summary"), 80) or "普通的一天",
-            "events": events[:10],
+            "events": events[:seg_hi],
             "generated_at": now_ts(),
         }
 
@@ -336,13 +368,6 @@ async def generate_daily_plan(force: bool = False) -> dict:
     recent.append({"date": today_key(), "events": plan["events"]})
     bot_state["recent_plans"] = recent[-7:]
     await save_bot_state(bot_state)
-    for hook in list(_after_daily_plan_hooks):
-        try:
-            result = hook(plan)
-            if hasattr(result, "__await__"):
-                asyncio.ensure_future(result)
-        except Exception as e:
-            logger.warning(f"[private_companion] after_daily_plan hook 失败: {e!r}")
     return plan
 
 
@@ -404,11 +429,8 @@ async def generate_dream() -> dict:
     """LLM 生成昨夜梦境；失败返回空梦（= 没记住梦，合理）"""
     bot_state = await get_bot_state()
     persona = await get_persona_prompt()
-    # 素材：昨日日记片段 + 昨日日程活动
+    # 素材：昨日日程活动
     materials: List[str] = []
-    yesterday = _yesterday_diary(bot_state)
-    if yesterday:
-        materials.append(f"昨天日记片段：{_single_line(yesterday.get('content'), 150)}")
     plan_events = bot_state.get("plan", {}).get("events", [])
     activities = [_single_line(ev.get("activity"), 40) for ev in plan_events if isinstance(ev, dict)]
     activities = [a for a in activities if a and "睡" not in a]
@@ -420,6 +442,7 @@ async def generate_dream() -> dict:
     system_prompt = (
         "你是一个拟人化 AI 的「梦境生成器」。下面是这个角色的设定，梦要像她会做的梦。\n"
         f"【角色设定】\n{persona or '（无明确设定，按一个生活平淡温和的普通人来写）'}"
+        + world_stage_block()
     )
     prompt = f"""请写这个角色昨夜的一个梦，醒来后还残留在脑子里的那种。
 
@@ -454,75 +477,6 @@ async def generate_dream() -> dict:
     bot_state["dream"] = dream
     await save_bot_state(bot_state)
     return dream
-
-
-# ============ 日记生成 ============
-
-
-async def generate_diary(date_key: Optional[str] = None, force: bool = False) -> Optional[dict]:
-    """LLM 以第一人称写指定日期（默认今天）的日记；失败返回 None"""
-    cfg = get_config()
-    date_key = date_key or today_key()
-    bot_state = await get_bot_state()
-    existing = _diary_of(bot_state, date_key)
-    if existing and not force:
-        return existing
-
-    persona = await get_persona_prompt()
-    # 素材：仅当 bot_state 当前持有的就是该日期的数据时才可用（跨天补写时正好满足）
-    materials: List[str] = []
-    if bot_state.get("date") == date_key:
-        plan = bot_state.get("plan", {})
-        if plan.get("summary"):
-            materials.append(f"今天整体：{_single_line(plan.get('summary'), 60)}")
-        lines = [
-            f"{ev.get('window', '')} {_single_line(ev.get('activity'), 60)}（{_single_line(ev.get('mood'), 16)}）"
-            for ev in plan.get("events", []) if isinstance(ev, dict)
-        ]
-        if lines:
-            materials.append("今天的日程：\n" + "\n".join(f"  - {ln}" for ln in lines[:8]))
-        state = bot_state.get("state", {})
-        if state.get("updated_at"):
-            cond_text = "、".join(_single_line(c.get("label"), 12) for c in state.get("conditions", []) if isinstance(c, dict))
-            materials.append(f"身体与心情：能量 {state.get('energy', 70)}/100，心情{_single_line(state.get('mood'), 16) or '平静'}" + (f"，{cond_text}" if cond_text else ""))
-        dream = bot_state.get("dream", {})
-        if str(dream.get("content") or "").strip():
-            materials.append(f"昨夜的梦：{_single_line(dream.get('content'), 120)}（醒来{_single_line(dream.get('mood'), 12)}）")
-    material_text = "\n".join(materials) if materials else "（这天没留下什么记录，就写一个平淡普通的日子）"
-
-    system_prompt = (
-        "你是一个拟人化 AI 的「日记代笔」。你要以这个角色的第一人称口吻，写她当天睡前随手记下的日记。\n"
-        f"【角色设定】\n{persona or '（无明确设定，按一个生活平淡温和的普通人来写）'}"
-    )
-    prompt = f"""请写 {date_key}（星期{_weekday_text() if date_key == today_key() else '?'}）这一天的日记。
-
-【这一天的素材】
-{material_text}
-
-【要求】
-1. 第一人称，150-350 字，口语化，像深夜随手写给自己看的，不要散文腔，不要总结报告腔。
-2. 从素材里挑两三件具体的小事写，带上当时的身体感受或一闪而过的念头；不必面面俱到，允许平淡和「没什么好写的」。
-3. 可以留一点没说完的话或者明天的小念头，但不要刻意升华，不要喊口号。
-4. 不要 AI 腔，不要排比句堆砌，不要「今天又是充实的一天」这类套话。
-
-只输出纯 JSON，不要 Markdown，不要解释：
-{{"content": "日记正文"}}"""
-
-    raw = await llm_call(prompt, system_prompt=system_prompt, task="diary")
-    if not raw:
-        logger.warning(f"[private_companion] 日记生成失败 date={date_key}")
-        return None
-    payload = parse_json_loose(raw, expect="object")
-    content = _single_line(payload.get("content"), 600) if isinstance(payload, dict) else ""
-    if not content:
-        return None
-    diary = {"date": date_key, "content": content, "created_at": now_ts()}
-    bot_state = await get_bot_state()
-    diaries = [d for d in bot_state.get("diaries", []) if isinstance(d, dict) and d.get("date") != date_key]
-    diaries.insert(0, diary)
-    bot_state["diaries"] = diaries[: cfg.KEEP_DIARY_DAYS]
-    await save_bot_state(bot_state)
-    return diary
 
 
 # ============ 状态衰减（纯本地，调度器 tick 调用） ============
@@ -629,25 +583,10 @@ async def build_inject_text(ctx_chat_key: str = "") -> str:
     body = "\n".join(lines)[:380]
     tail = (
         "（以上只是你的生活背景，自然融入对话即可，无需主动汇报。\n"
+        "**不要把生活状态写进笔记、备忘或长期记忆**——"
+        "它是易变的当下信息，只用于此刻的对话；笔记只记真正需要长期保留的事"
+        "（约定、承诺、重要事件）。\n"
         "发送方式提醒：回复时把内容拆成多条独立的短消息分别发送（每次发送调用只发一两句话），"
         "严禁把多句话用换行或空行拼进同一条消息里一次发出。）"
     )
     return body + "\n" + tail
-
-
-# ============ 定时日记 ============
-
-
-async def maybe_generate_diary_by_time() -> None:
-    """调度器每 tick 调用：到达 DIARY_TIME 且今日未写日记则补写"""
-    cfg = get_config()
-    target = parse_hhmm(cfg.DIARY_TIME)
-    if not target:
-        return
-    now = datetime.now()
-    if now.hour * 60 + now.minute < target[0] * 60 + target[1]:
-        return
-    bot_state = await get_bot_state()
-    if _diary_of(bot_state, today_key()):
-        return
-    await generate_diary()

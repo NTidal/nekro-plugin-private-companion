@@ -1,910 +1,1110 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>私人陪伴 - 控制面板</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>私人陪伴</title>
 <style>
 :root {
-  --bg: #0e1014;
-  --surface: #171a21;
-  --surface-2: #1e222c;
-  --surface-3: #262b38;
-  --border: #2c3240;
-  --text: #e8eaf0;
-  --text-dim: #9aa3b5;
-  --text-faint: #6b7385;
-  --accent: #8b7cf6;
-  --accent-soft: rgba(139, 124, 246, 0.16);
-  --pink: #f47fb4;
-  --pink-soft: rgba(244, 127, 180, 0.14);
-  --green: #4ade80;
-  --green-soft: rgba(74, 222, 128, 0.14);
-  --red: #f87171;
-  --red-soft: rgba(248, 113, 113, 0.14);
-  --amber: #fbbf24;
-  --amber-soft: rgba(251, 191, 36, 0.14);
-  --radius: 14px;
-  --shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+  --bg: #090a0e;
+  --surface: #11131a;
+  --surface-2: #151821;
+  --surface-3: #1a1e28;
+  --line: rgba(255, 255, 255, .075);
+  --line-strong: rgba(255, 255, 255, .13);
+  --text: #f1f2f5;
+  --text-soft: #b8bdc8;
+  --muted: #7b8290;
+  --accent: #9d8cff;
+  --accent-soft: rgba(157, 140, 255, .13);
+  --success: #67d6a5;
+  --warning: #e8bb73;
+  --danger: #f07b82;
+  --info: #70b8e8;
+  --radius-xl: 20px;
+  --radius-lg: 15px;
+  --radius-md: 11px;
+  --radius-sm: 8px;
+  --shadow: 0 8px 28px rgba(0, 0, 0, .35);
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
+html.day-mode {
+  color-scheme: light;
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --surface-3: #eef0f5;
+  --line: rgba(15, 23, 42, .09);
+  --line-strong: rgba(15, 23, 42, .16);
+  --text: #101828;
+  --text-soft: #344054;
+  --muted: #667085;
+  --accent: #6d4df6;
+  --accent-soft: rgba(109, 77, 246, .1);
+  --success: #0f9d6f;
+  --warning: #b6722a;
+  --danger: #d64550;
+  --info: #1e7fb8;
+  --shadow: 0 8px 24px rgba(16, 24, 40, .1);
+}
+html.day-mode dialog { background: var(--surface); color: var(--text); }
+html.day-mode dialog::backdrop { background: rgba(31, 41, 55, .3); }
+html.day-mode option { color: var(--text); background: var(--surface); }
+html.day-mode input[type="checkbox"], html.day-mode input[type="radio"] { accent-color: var(--accent); }
+html.day-mode * { scrollbar-color: #c5ccda transparent; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; height: 100%; }
 body {
-  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.6;
-  min-height: 100vh;
+  background: var(--bg); color: var(--text);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
-.container { max-width: 1080px; margin: 0 auto; padding: 24px 20px 64px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); text-decoration: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 
-/* ===== 头部 ===== */
-.header {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+/* ===== 布局 ===== */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
 }
-.header h1 {
-  font-size: 22px; font-weight: 700;
-  background: linear-gradient(120deg, var(--pink), var(--accent));
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.header .sub { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
-.header-pills { display: flex; gap: 8px; }
-.pill {
-  font-size: 12px; padding: 4px 12px; border-radius: 999px;
-  border: 1px solid var(--border); color: var(--text-dim); background: var(--surface);
-}
-.pill.on { color: var(--green); border-color: rgba(74,222,128,.35); background: var(--green-soft); }
-.pill.off { color: var(--text-faint); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: .2px; }
+.brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+.brand small { color: var(--muted); font-weight: 400; }
+.topbar-spacer { flex: 1; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.refresh-hint { color: var(--muted); font-size: 12px; }
 
-/* ===== 标签页 ===== */
-.tabs {
-  display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 5px; margin-bottom: 20px; overflow-x: auto;
+.app { display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: calc(100vh - 53px); }
+.sidebar {
+  border-right: 1px solid var(--line);
+  padding: 16px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  position: sticky; top: 53px; align-self: start;
+  max-height: calc(100vh - 53px); overflow-y: auto;
 }
-.tab-btn {
-  flex: 1; min-width: 90px; padding: 9px 14px; border: none; border-radius: 10px;
-  background: transparent; color: var(--text-dim); font-size: 14px; cursor: pointer;
-  white-space: nowrap; transition: all .18s;
+.nav-label { color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 8px 10px 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 9px 10px; border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--text-soft); cursor: pointer;
+  text-align: left; transition: background .14s, color .14s;
 }
-.tab-btn:hover { color: var(--text); background: var(--surface-2); }
-.tab-btn.active {
-  background: linear-gradient(120deg, rgba(244,127,180,.22), rgba(139,124,246,.22));
-  color: var(--text); font-weight: 600;
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.nav-item .nav-badge {
+  margin-left: auto; font-size: 11px; color: var(--muted);
+  background: var(--surface-3); border-radius: 20px; padding: 1px 8px;
 }
-.tab-panel { display: none; }
-.tab-panel.active { display: block; animation: fadein .2s ease; }
-@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+.nav-item[aria-current="page"] .nav-badge { color: var(--text-soft); }
+.side-foot { margin-top: auto; padding: 12px 10px 4px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
 
-/* ===== 卡片 ===== */
-.card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow);
-  margin-bottom: 16px;
-}
-.card h3 {
-  font-size: 13px; font-weight: 600; color: var(--text-dim);
-  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px;
-}
-.grid { display: grid; gap: 16px; }
-.grid-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-.big-value { font-size: 26px; font-weight: 700; }
-.muted { color: var(--text-faint); font-size: 13px; }
-.placeholder { color: var(--text-faint); font-size: 13px; font-style: italic; padding: 8px 0; }
+main { padding: 20px 24px 40px; min-width: 0; }
+.page { display: none; }
+.page.active { display: block; animation: pageIn .16s ease-out; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.page-head { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.page-title { font-size: 19px; font-weight: 680; margin: 0; }
+.page-desc { color: var(--muted); font-size: 13px; margin: 3px 0 0; }
+.head-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* ===== 进度条 ===== */
-.bar { height: 8px; background: var(--surface-3); border-radius: 99px; overflow: hidden; margin-top: 6px; }
-.bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--pink), var(--accent)); transition: width .4s; }
-.bar-fill.green { background: linear-gradient(90deg, #34d399, #4ade80); }
-
-/* ===== chips ===== */
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip {
-  font-size: 12px; padding: 3px 10px; border-radius: 999px;
-  background: var(--accent-soft); color: #c4baff; border: 1px solid rgba(139,124,246,.3);
-}
-.chip.pink { background: var(--pink-soft); color: #ffb3d4; border-color: rgba(244,127,180,.3); }
-.chip.amber { background: var(--amber-soft); color: var(--amber); border-color: rgba(251,191,36,.3); }
-
-/* ===== 按钮 ===== */
+/* ===== 组件 ===== */
 .btn {
-  padding: 7px 16px; border-radius: 9px; border: 1px solid var(--border);
-  background: var(--surface-2); color: var(--text); font-size: 13px; cursor: pointer;
-  transition: all .15s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text);
+  cursor: pointer; transition: background .14s, border-color .14s, opacity .14s;
+  white-space: nowrap; font-weight: 550;
 }
 .btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--accent); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn.primary { background: linear-gradient(120deg, var(--pink), var(--accent)); border: none; font-weight: 600; }
-.btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
-.btn.danger { color: var(--red); border-color: rgba(248,113,113,.35); }
-.btn.danger:hover:not(:disabled) { background: var(--red-soft); border-color: var(--red); }
-.btn.small { padding: 5px 12px; font-size: 12px; }
-.btn .spinner {
-  display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.3);
-  border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite;
-  vertical-align: -2px; margin-right: 6px;
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: transparent; color: #0b0a14; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn.ghost { background: transparent; }
+.btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: transparent; }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: var(--danger); }
+.btn.small { padding: 5px 10px; font-size: 12.5px; border-radius: var(--radius-sm); }
+.btn.is-loading { position: relative; color: transparent !important; pointer-events: none; }
+.btn.is-loading::after {
+  content: ""; position: absolute; width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text) 30%, transparent);
+  border-top-color: var(--accent); animation: spin .6s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ===== 用户卡片 ===== */
-.user-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
-.user-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.user-name { font-size: 16px; font-weight: 700; }
-.user-qq { font-size: 12px; color: var(--text-faint); margin-left: 8px; }
-.badge { font-size: 11px; padding: 2px 10px; border-radius: 999px; font-weight: 600; }
-.badge.ok { background: var(--green-soft); color: var(--green); }
-.badge.no { background: var(--surface-3); color: var(--text-faint); }
-.badge.off { background: var(--red-soft); color: var(--red); }
-.user-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 18px; margin-bottom: 12px; }
-.meta-item .label { font-size: 11px; color: var(--text-faint); }
-.meta-item .value { font-size: 13px; }
-.user-actions { display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
-.reason-line { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; padding: 6px 10px; background: var(--surface-2); border-radius: 8px; }
-
-/* ===== 时间线 ===== */
-.timeline { position: relative; padding-left: 18px; }
-.timeline::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px; background: var(--border); }
-.tl-item { position: relative; padding: 6px 0 6px 12px; }
-.tl-item::before {
-  content: ""; position: absolute; left: -17px; top: 14px; width: 8px; height: 8px;
-  border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px;
 }
-.tl-window { font-size: 12px; color: var(--pink); font-weight: 600; }
-.tl-activity { font-size: 14px; }
-.tl-mood { font-size: 12px; color: var(--text-faint); }
+.card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.card-head > div:first-child { min-width: 0; flex: 1 1 auto; }
+.card-title { font-size: 14.5px; font-weight: 650; margin: 0; }
+.card-sub { color: var(--muted); font-size: 12.5px; margin: 2px 0 0; }
+.card-head .btn { margin-left: auto; }
+.card-head > div[style*="flex"] { flex: 0 0 auto; }
+.card-head .chip { flex: 0 0 auto; }
 
-/* ===== 日记 ===== */
-.diary-item { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
-.diary-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; cursor: pointer; background: var(--surface-2); }
-.diary-head:hover { background: var(--surface-3); }
-.diary-date { font-weight: 600; font-size: 14px; }
-.diary-arrow { color: var(--text-faint); font-size: 12px; transition: transform .2s; }
-.diary-item.open .diary-arrow { transform: rotate(90deg); }
-.diary-body { display: none; padding: 12px 14px; font-size: 13px; color: var(--text-dim); white-space: pre-wrap; border-top: 1px solid var(--border); }
-.diary-item.open .diary-body { display: block; }
-
-/* ===== 操作页 ===== */
-.op-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--border); }
-.op-row:last-child { border-bottom: none; }
-.op-desc { flex: 1; min-width: 200px; }
-.op-desc .name { font-size: 14px; font-weight: 600; }
-.op-desc .hint { font-size: 12px; color: var(--text-faint); }
-.op-result { font-size: 12px; min-width: 80px; }
-.op-result.ok { color: var(--green); }
-.op-result.err { color: var(--red); }
-textarea.preview {
-  width: 100%; min-height: 220px; resize: vertical; padding: 12px 14px;
-  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-  color: var(--text-dim); font-size: 13px; font-family: ui-monospace, Consolas, monospace;
-  line-height: 1.6;
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.metric {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 14px 16px;
 }
-textarea.preview:focus { outline: none; border-color: var(--accent); }
-.input, textarea.input {
-  width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border);
-  background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit;
-}
-textarea.input { min-height: 90px; resize: vertical; line-height: 1.55; }
-.input:focus, textarea.input:focus { outline: none; border-color: var(--accent); }
-.field { margin-bottom: 12px; }
-.field label { display:block; font-size:12px; color: var(--text-dim); margin-bottom: 5px; }
-.visual-preview { max-width: 100%; max-height: 360px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); object-fit: contain; }
-.visual-actions { display:flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.visual-meta { font-size: 12px; color: var(--text-faint); margin-top: 8px; word-break: break-all; }
-.visual-progress { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); display: none; }
-.visual-progress.show { display: block; }
-.visual-progress-line { display:flex; justify-content:space-between; gap:8px; font-size:12px; color: var(--text-dim); margin-bottom: 8px; }
-.visual-progress .bar { margin-top: 0; }
-.visual-progress.indeterminate .bar-fill { width: 35%; animation: progressSlide 1.2s ease-in-out infinite; }
-.schedule-selfie-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; margin-top: 10px; }
-.schedule-selfie-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 10px; }
-.schedule-selfie-card .time { font-weight: 700; margin-bottom: 6px; }
-.schedule-selfie-card .activity { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-bottom: 8px; }
-.schedule-selfie-card .mood { font-size: 11px; color: var(--text-faint); margin-bottom: 8px; }
-.schedule-selfie-imgbox { min-height: 150px; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius: 10px; background: var(--bg); }
-.schedule-selfie-imgbox img { width:100%; max-height:220px; object-fit:cover; border-radius: 10px; }
-@keyframes progressSlide { 0% { transform: translateX(-120%); } 50% { transform: translateX(90%); } 100% { transform: translateX(260%); } }
+.metric .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.metric .value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.metric .value.small { font-size: 17px; }
+.metric .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.metric .meter { height: 4px; border-radius: 4px; background: var(--surface-3); margin-top: 9px; overflow: hidden; }
+.metric .meter > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 
-/* ===== Toast ===== */
-#toast-box { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 99; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-size: 12px; padding: 3px 9px; border-radius: 20px;
+  background: var(--surface-3); color: var(--text-soft); border: 1px solid var(--line);
+}
+.chip.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 32%, transparent); }
+.chip.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 32%, transparent); }
+.chip.err { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 32%, transparent); }
+.chip.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 32%, transparent); }
+.chip.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.hint { color: var(--muted); font-size: 12.5px; }
+.empty { color: var(--muted); text-align: center; padding: 28px 10px; font-size: 13px; }
+.error-box {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger); border-radius: var(--radius-md);
+  padding: 12px 14px; font-size: 13px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+
+/* 表格 */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md); }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th, table.data td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; background: var(--surface-2); }
+table.data tbody tr:last-child td { border-bottom: 0; }
+table.data tbody tr:hover { background: var(--surface-2); }
+td.actions { white-space: nowrap; }
+td.actions .btn { margin-right: 6px; }
+.cell-cut { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 420px; }
+.cell-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text-soft); }
+
+/* 表单 */
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > label { color: var(--muted); font-size: 12.5px; }
+.input, textarea.input, select.input {
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md); padding: 8px 10px; color: var(--text);
+  width: 100%; transition: border-color .14s;
+}
+.input:focus { border-color: var(--accent); outline: none; }
+textarea.input { resize: vertical; min-height: 88px; line-height: 1.6; }
+textarea.input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+select.input { cursor: pointer; }
+.field-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 3px; gap: 3px; }
+.seg button {
+  border: 0; background: transparent; color: var(--text-soft);
+  padding: 6px 13px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 550;
+}
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--text); }
+
+/* 弹窗 */
+dialog.npc-dialog {
+  border: 1px solid var(--line-strong); border-radius: var(--radius-lg);
+  background: var(--surface); color: var(--text); padding: 0;
+  width: min(680px, calc(100vw - 32px)); max-height: min(86vh, 900px);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+dialog.npc-dialog::backdrop { background: rgba(4, 5, 9, .62); backdrop-filter: blur(2px); }
+.dialog-head { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.dialog-head h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.dialog-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 13px; }
+.dialog-foot { padding: 13px 18px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 9px; background: var(--surface-2); }
+.dialog-foot .hint { margin-right: auto; }
+
+/* toast */
+.toast-region { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
 .toast {
-  padding: 10px 20px; border-radius: 10px; font-size: 13px; box-shadow: var(--shadow);
-  background: var(--surface-3); border: 1px solid var(--border); max-width: 90vw;
-  animation: toastin .25s ease;
+  background: var(--surface); border: 1px solid var(--line-strong); border-left: 3px solid var(--info);
+  border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; box-shadow: var(--shadow);
+  max-width: min(360px, calc(100vw - 32px)); animation: toastIn .16s ease-out;
 }
-.toast.ok { border-color: rgba(74,222,128,.4); color: var(--green); }
-.toast.err { border-color: rgba(248,113,113,.4); color: var(--red); }
-@keyframes toastin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; } }
+.toast.ok { border-left-color: var(--success); }
+.toast.err { border-left-color: var(--danger); }
+.toast.warn { border-left-color: var(--warning); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 
-.dream-box { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: var(--text-dim); white-space: pre-wrap; }
-.refresh-hint { font-size: 11px; color: var(--text-faint); }
+/* 预览 */
+pre.preview {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  line-height: 1.65; white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow-y: auto;
+  margin: 0; color: var(--text-soft);
+}
+
+.op-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.op-row:last-child { border-bottom: 0; }
+.op-desc { min-width: 0; }
+.op-desc .name { font-weight: 600; font-size: 13.5px; }
+.op-desc .hint { margin-top: 1px; }
+.op-result { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 1080px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: none; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 12px; }
+  .nav-label, .side-foot { display: none; }
+  .nav-item { white-space: nowrap; width: auto; }
+  main { padding: 16px 14px 32px; }
+}
+@media (max-width: 620px) {
+  body { font-size: 15px; }
+  .head-actions { width: 100%; }
+  .head-actions .btn { flex: 1; }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cell-cut { max-width: 190px; }
+  td.actions .btn { margin-bottom: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 </style>
 </head>
 <body>
-<div class="container">
-
-  <div class="header">
-    <div>
-      <h1>私人陪伴 · 控制面板</h1>
-      <div class="sub">生活感与主动陪伴管理 <span class="refresh-hint" id="refresh-hint"></span></div>
-    </div>
-    <div class="header-pills">
-      <span class="pill" id="pill-proactive">主动陪伴 …</span>
-      <span class="pill" id="pill-inject">状态注入 …</span>
-    </div>
+<header class="topbar">
+  <div class="brand"><span class="brand-dot"></span>私人陪伴 <small id="brand-meta">companion</small></div>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-actions">
+    <span class="refresh-hint" id="refresh-hint"></span>
+    <button class="btn small" id="btn-theme" type="button" aria-label="切换日间/夜间模式">日间</button>
+    <button class="btn small" id="btn-refresh" type="button">刷新</button>
   </div>
+</header>
 
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="overview">总览</button>
-    <button class="tab-btn" data-tab="users">陪伴对象</button>
-    <button class="tab-btn" data-tab="life">生活记录</button>
-    <button class="tab-btn" data-tab="visuals">视觉资产</button>
-    <button class="tab-btn" data-tab="ops">操作</button>
-  </div>
+<div class="app">
+  <nav class="sidebar" aria-label="页面导航">
+    <span class="nav-label">面板</span>
+    <button class="nav-item active" data-page="overview" aria-current="page">总览</button>
+    <button class="nav-item" data-page="users">陪伴对象</button>
+    <button class="nav-item" data-page="life">生活记录</button>
+    <button class="nav-item" data-page="content">角色内容</button>
+    <button class="nav-item" data-page="ops">操作</button>
+    <div class="side-foot">配置保存后立即生效。<br>页面挂载于 /plugins/xiaojiu.private_companion/</div>
+  </nav>
 
-  <!-- ===== 总览 ===== -->
-  <div class="tab-panel active" id="panel-overview">
-    <div class="grid grid-2">
-      <div class="card">
-        <h3>今日状态</h3>
-        <div class="big-value" id="ov-date">—</div>
-        <div style="margin-top:12px">
-          <div class="muted">能量 <span id="ov-energy-text"></span></div>
-          <div class="bar"><div class="bar-fill green" id="ov-energy-bar" style="width:0%"></div></div>
+  <main>
+    <!-- ============ 总览 ============ -->
+    <section class="page active" data-page="overview" aria-labelledby="t-overview">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title" id="t-overview">总览</h1>
+          <p class="page-desc">陪伴对象、今日生活状态与主动陪伴的当前情况</p>
         </div>
-        <div style="margin-top:12px">
-          <div class="muted">心情</div>
-          <div id="ov-mood">—</div>
-        </div>
-        <div style="margin-top:12px">
-          <div class="muted" style="margin-bottom:6px">身体状态</div>
-          <div class="chips" id="ov-conditions"><span class="placeholder">暂无</span></div>
+        <div class="head-actions">
+          <button class="btn" data-act="jump" data-page="content" type="button">查看角色内容</button>
+          <button class="btn" data-act="jump" data-page="life" type="button">今日生活</button>
         </div>
       </div>
-      <div class="card">
-        <h3>今日概括</h3>
-        <div id="ov-plan-summary" class="muted" style="font-size:14px;color:var(--text)">—</div>
-        <div style="margin-top:14px">
-          <div class="muted" style="margin-bottom:4px">梦境余韵</div>
-          <div id="ov-afterglow" style="font-size:13px;color:var(--text-dim)">—</div>
+      <div id="overview-body">
+        <div class="metric-grid" id="overview-metrics"></div>
+        <div class="card">
+          <div class="card-head"><div><h2 class="card-title">今日日程</h2><p class="card-sub" id="ov-plan-date"></p></div>
+            <button class="btn small" data-act="regen" data-target="plan" type="button">重新生成日程</button></div>
+          <div id="ov-plan" class="hint">加载中…</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2 class="card-title">今日状态与梦境</h2><p class="card-sub">能量 / 心情 / 身体状态 / 梦境余韵</p></div>
+            <div style="display:flex;gap:8px;margin-left:auto">
+              <button class="btn small" data-act="regen" data-target="state" type="button">重生成状态</button>
+              <button class="btn small" data-act="regen" data-target="dream" type="button">重生成梦境</button>
+            </div>
+          </div>
+          <div id="ov-state" class="chips"></div>
+          <div id="ov-dream" class="hint" style="margin-top:10px"></div>
         </div>
       </div>
-      <div class="card">
-        <h3>陪伴概况</h3>
-        <div class="user-meta">
-          <div class="meta-item"><div class="label">陪伴对象</div><div class="value big-value" id="ov-user-count" style="font-size:22px">—</div></div>
-          <div class="meta-item"><div class="label">最近日记</div><div class="value" id="ov-diary-date">—</div></div>
+    </section>
+
+    <!-- ============ 陪伴对象 ============ -->
+    <section class="page" data-page="users" aria-labelledby="t-users">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title" id="t-users">陪伴对象</h1>
+          <p class="page-desc">启用状态、备注、聊天称呼与主动陪伴额度</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn small" data-act="users-reload" type="button">刷新列表</button>
         </div>
       </div>
-      <div class="card">
-        <h3>今日 Token 消耗</h3>
-        <div class="user-meta">
-          <div class="meta-item"><div class="label">总量</div><div class="value big-value" id="ov-token-total" style="font-size:22px">—</div></div>
-          <div class="meta-item"><div class="label">调用次数</div><div class="value" id="ov-token-calls">—</div></div>
+      <div id="users-body"><div class="card"><div class="empty">加载中…</div></div></div>
+    </section>
+
+    <!-- ============ 生活记录 ============ -->
+    <section class="page" data-page="life" aria-labelledby="t-life">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title" id="t-life">生活记录</h1>
+          <p class="page-desc">今日日程、身体状态与梦境，以及注入给模型的生活文本预览</p>
         </div>
-        <div class="chips" id="ov-token-tasks" style="margin-top:8px"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== 陪伴对象 ===== -->
-  <div class="tab-panel" id="panel-users">
-    <div class="grid" id="users-list">
-      <div class="placeholder">加载中…</div>
-    </div>
-  </div>
-
-  <!-- ===== 生活记录 ===== -->
-  <div class="tab-panel" id="panel-life">
-    <div class="card">
-      <h3>今日日程</h3>
-      <div id="life-timeline"><div class="placeholder">暂无日程</div></div>
-    </div>
-    <div class="card">
-      <h3>梦境</h3>
-      <div id="life-dream"><div class="placeholder">暂无梦境记录</div></div>
-    </div>
-    <div class="card">
-      <h3>日记</h3>
-      <div id="life-diaries"><div class="placeholder">还没有日记</div></div>
-    </div>
-  </div>
-
-  <!-- ===== 视觉资产 ===== -->
-  <div class="tab-panel" id="panel-visuals">
-    <div class="grid grid-2">
-      <div class="card">
-        <h3>人设参考图</h3>
-        <div id="visual-persona-preview"><div class="placeholder">还没有上传人设图</div></div>
-        <div class="visual-actions">
-          <input type="file" id="persona-file" accept="image/png,image/jpeg,image/webp" class="input">
-          <button class="btn primary" id="btn-upload-persona" onclick="uploadPersonaImage()">上传/替换人设图</button>
+        <div class="head-actions">
+          <button class="btn" id="btn-preview-refresh" type="button">刷新注入预览</button>
         </div>
-        <div class="visual-meta" id="visual-persona-meta"></div>
       </div>
       <div class="card">
-        <h3>日程自拍预览</h3>
-        <div class="visual-actions">
-          <button class="btn primary" id="btn-generate-selfie" onclick="generateDaySelfies(false)">生成/读取今日全部自拍</button>
-          <button class="btn" id="btn-regenerate-selfie" onclick="generateDaySelfies(true)">强制重拍全部</button>
-          <button class="btn" onclick="loadScheduleSelfies()">刷新列表</button>
-        </div>
-        <div class="visual-progress" id="visual-selfie-progress">
-          <div class="visual-progress-line"><span id="visual-selfie-progress-text">等待开始</span><span id="visual-selfie-progress-time">0s</span></div>
-          <div class="bar"><div class="bar-fill" id="visual-selfie-progress-bar" style="width:0%"></div></div>
-        </div>
-        <div class="visual-meta" id="visual-selfie-meta">每个日程时间段会对应一张日常自拍；需要开启 SELFIE_ENABLED。</div>
-        <div id="visual-selfie-preview" class="schedule-selfie-grid"><div class="placeholder">正在加载日程自拍状态…</div></div>
+        <div class="card-head"><div><h2 class="card-title">完整生活状态</h2><p class="card-sub" id="life-date"></p></div></div>
+        <div id="life-body" class="hint">加载中…</div>
       </div>
-    </div>
-    <div class="card">
-      <h3>视觉提示词</h3>
-      <div class="field"><label>角色外貌提示词</label><textarea class="input" id="visual-character" placeholder="白发少女，蓝灰色眼睛，日常居家风..."></textarea></div>
-      <div class="field"><label>画风提示词</label><textarea class="input" id="visual-style" placeholder="anime illustration, soft light, casual selfie..."></textarea></div>
-      <div class="field"><label>负面提示词</label><textarea class="input" id="visual-negative" placeholder="low quality, bad hands..."></textarea></div>
-      <div class="field"><label>Seed / 一致性提示（可选）</label><input class="input" id="visual-seed" placeholder="optional"></div>
-      <div class="visual-actions">
-        <button class="btn primary" id="btn-save-visual-profile" onclick="saveVisualProfile()">保存视觉人设</button>
-        <button class="btn" onclick="loadVisuals()">刷新</button>
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">注入预览</h2><p class="card-sub">当前会注入对话的生活状态文本</p></div>
+          <button class="btn small" id="btn-preview-copy" type="button">复制</button></div>
+        <pre class="preview" id="inject-preview">点击「刷新注入预览」查看当前注入对话的生活状态文本</pre>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <!-- ===== 操作 ===== -->
-  <div class="tab-panel" id="panel-ops">
-    <div class="card">
-      <h3>内容重生成</h3>
-      <div class="op-row">
-        <div class="op-desc"><div class="name">每日日程</div><div class="hint">重新生成今日时间块安排与概括</div></div>
-        <span class="op-result" id="re-plan-result"></span>
-        <button class="btn" id="re-plan" onclick="regen('plan')">重新生成日程</button>
+    <!-- ============ 角色内容 ============ -->
+    <section class="page" data-page="content" aria-labelledby="t-content">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title" id="t-content">角色内容</h1>
+          <p class="page-desc">世界观舞台、每日场景池与事件池 —— 保存后自动热重载，无需重启</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn" id="btn-world-save" type="button">保存世界观</button>
+        </div>
       </div>
-      <div class="op-row">
-        <div class="op-desc"><div class="name">当前状态</div><div class="hint">重新生成能量 / 心情 / 身体状态</div></div>
-        <span class="op-result" id="re-state-result"></span>
-        <button class="btn" id="re-state" onclick="regen('state')">重新生成状态</button>
-      </div>
-      <div class="op-row">
-        <div class="op-desc"><div class="name">梦境</div><div class="hint">重新生成今日梦境与余韵</div></div>
-        <span class="op-result" id="re-dream-result"></span>
-        <button class="btn" id="re-dream" onclick="regen('dream')">重新生成梦境</button>
-      </div>
-      <div class="op-row">
-        <div class="op-desc"><div class="name">今日日记</div><div class="hint">立即补写 / 重写当天日记</div></div>
-        <span class="op-result" id="re-diary-result"></span>
-        <button class="btn" id="re-diary" onclick="regen('diary')">生成今日日记</button>
-      </div>
-    </div>
-    <div class="card">
-      <h3>注入预览 <button class="btn small" id="btn-preview" onclick="loadInjectPreview()" style="float:right;margin-top:-4px">刷新预览</button></h3>
-      <textarea class="preview" id="inject-preview" readonly placeholder="点击「刷新预览」查看当前注入对话的生活状态文本"></textarea>
-    </div>
-  </div>
 
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">世界观舞台</h2><p class="card-sub">日程、梦境与日记发生时必须遵守的世界语境（含现代元素禁入清单）</p></div>
+          <span class="chip" id="world-chars">0 字</span></div>
+        <textarea class="input mono" id="world-stage-input" rows="9" spellcheck="false"
+          placeholder="填写世界观设定…" aria-label="世界观舞台文本"></textarea>
+        <p class="hint" style="margin:10px 0 0">提示：保存会备份当前 core.py 到 content_backups/ 后原子替换，并热重载模块。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">每日场景池</h2><p class="card-sub">每天抽取一个场景作为当日主线（7 天冷却）</p></div>
+          <div style="display:flex;gap:8px;margin-left:auto">
+            <button class="btn small" data-act="pool-new" data-kind="scenes" type="button">新建场景</button>
+          </div></div>
+        <div id="scenes-body"><div class="empty">加载中…</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">每日事件池</h2><p class="card-sub">每天抽取两条事件给当日添细节</p></div>
+          <div style="display:flex;gap:8px;margin-left:auto">
+            <button class="btn small" data-act="pool-new" data-kind="events" type="button">新建事件</button>
+          </div></div>
+        <div id="events-body"><div class="empty">加载中…</div></div>
+      </div>
+    </section>
+
+    <!-- ============ 操作 ============ -->
+    <section class="page" data-page="ops" aria-labelledby="t-ops">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title" id="t-ops">操作</h1>
+          <p class="page-desc">人设包导入导出与重新生成</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">人设包 导入 / 导出</h2><p class="card-sub">整套陪伴人设（世界观 + 场景池 + 事件池 + 触发词别名）打包成 zip，便于入库或实例间迁移</p></div></div>
+        <div class="op-row">
+          <div class="op-desc"><div class="name">导出</div><div class="hint">下载当前实例的角色内容包</div></div>
+          <span class="op-result" id="persona-pack-result"></span>
+          <button class="btn" id="btn-persona-export" type="button">导出整套人设（zip）</button>
+        </div>
+        <div class="op-row">
+          <div class="op-desc"><div class="name">导入</div><div class="hint">选择 zip 后覆盖当前角色内容（自动备份 + 热重载）</div></div>
+          <input type="file" id="persona-import-file" accept=".zip" class="input" style="max-width:220px;padding:5px 8px" aria-label="选择要导入的人设包">
+          <button class="btn" id="btn-persona-import" type="button">导入并覆盖</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">重新生成</h2><p class="card-sub">强制重新生成今日日程、状态或梦境</p></div></div>
+        <div class="field-row" style="align-items:flex-end">
+          <div class="field" style="min-width:180px">
+            <label for="regen-min-seg">日程段数下限（3-16）</label>
+            <input type="number" id="regen-min-seg" class="input" min="3" max="16" placeholder="留空用插件配置">
+          </div>
+          <div class="field" style="min-width:180px">
+            <label for="regen-max-seg">日程段数上限（3-20）</label>
+            <input type="number" id="regen-max-seg" class="input" min="3" max="20" placeholder="留空用插件配置">
+          </div>
+          <button class="btn" data-act="regen" data-target="plan" type="button">重新生成日程</button>
+          <button class="btn" data-act="regen" data-target="state" type="button">重新生成状态</button>
+          <button class="btn" data-act="regen" data-target="dream" type="button">重新生成梦境</button>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
-<div id="toast-box"></div>
 
+<div class="toast-region" id="toast-region" aria-live="polite" role="status"></div>
+
+<!-- 场景/事件编辑弹窗 -->
+<dialog class="npc-dialog" id="pool-dialog" aria-labelledby="pool-dialog-title">
+  <div class="dialog-head"><h3 id="pool-dialog-title">编辑</h3></div>
+  <div class="dialog-body">
+    <div class="field-row">
+      <div class="field" style="flex:1;min-width:200px">
+        <label for="pool-id">ID（唯一标识，保存后不可改）</label>
+        <input type="text" id="pool-id" class="input" maxlength="48" placeholder="如 snow_stop">
+      </div>
+      <div class="field" style="flex:1;min-width:200px">
+        <label for="pool-title" id="pool-title-label">标题</label>
+        <input type="text" id="pool-title" class="input" maxlength="120">
+      </div>
+    </div>
+    <div class="field" id="pool-setting-field">
+      <label for="pool-setting">场景描述（setting）</label>
+      <textarea id="pool-setting" class="input" maxlength="600" rows="3"></textarea>
+    </div>
+  </div>
+  <div class="dialog-foot">
+    <span class="hint" id="pool-dialog-hint"></span>
+    <button class="btn danger" id="pool-delete" type="button">删除</button>
+    <button class="btn ghost" data-act="dialog-close" type="button">取消</button>
+    <button class="btn primary" id="pool-save" type="button">保存</button>
+  </div>
+</dialog>
+
+<!-- 陪伴对象编辑弹窗 -->
+<dialog class="npc-dialog" id="user-dialog" aria-labelledby="user-dialog-title">
+  <div class="dialog-head"><h3 id="user-dialog-title">陪伴对象</h3></div>
+  <div class="dialog-body">
+    <div class="field">
+      <label for="user-qq">QQ 号</label>
+      <input type="text" id="user-qq" class="input" maxlength="16">
+    </div>
+    <div class="field">
+      <label for="user-remark">后台备注名</label>
+      <input type="text" id="user-remark" class="input" maxlength="80">
+    </div>
+    <div class="field">
+      <label for="user-nickname">聊天称呼</label>
+      <input type="text" id="user-nickname" class="input" maxlength="80">
+    </div>
+  </div>
+  <div class="dialog-foot">
+    <span class="hint" id="user-dialog-hint"></span>
+    <button class="btn ghost" data-act="dialog-close" type="button">取消</button>
+    <button class="btn primary" id="user-save" type="button">保存档案</button>
+  </div>
+</dialog>
 <script>
 "use strict";
 
-// ===== 基础工具 =====
-// 注意：页面挂载在 /plugins/xiaojiu.private_companion/ 下，API 必须用相对路径
-// 鉴权：复用 Nekro WebUI 的登录态（localStorage 的 auth-storage 中的 JWT）
-function getNekroToken() {
+/* ================= 状态与工具 ================= */
+const state = {
+  tab: "overview",
+  seq: { overview: 0, users: 0, life: 0, preview: 0, content: 0 },
+  users: [],
+  content: null,
+  pool: { kind: "scenes", index: -1 },
+  authPromise: null
+};
+
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function getAccessKey() {
   try {
     const raw = localStorage.getItem("auth-storage");
     if (!raw) return "";
-    const parsed = JSON.parse(raw);
-    return (parsed && parsed.state && parsed.state.token) || "";
+    const p = JSON.parse(raw);
+    return (p && p.state && p.state.token) || "";
   } catch (e) { return ""; }
 }
-async function api(path, opts) {
-  opts = opts || {};
-  opts.headers = opts.headers || {};
-  const token = getNekroToken();
-  if (token) opts.headers["Authorization"] = "Bearer " + token;
-  const r = await fetch(path, opts);
-  if (r.status === 401 || r.status === 403) {
-    throw new Error("未登录或登录已过期：请先在同一浏览器登录 Nekro WebUI 后台（" + location.origin + "），再刷新本页");
+function getNekroToken() { return getAccessKey(); }
+
+function toast(msg, type) {
+  const box = $("#toast-region");
+  const el = document.createElement("div");
+  el.className = "toast " + (type || "info");
+  el.textContent = String(msg || "");
+  box.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 260); }, 3600);
+}
+
+function setLoading(btn, on) {
+  if (!btn) return;
+  btn.classList.toggle("is-loading", !!on);
+  btn.disabled = !!on;
+}
+
+function fmtTs(sec) {
+  if (!sec) return "";
+  const d = new Date(sec * 1000);
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/* ================= API ================= */
+async function api(path, options = {}) {
+  options = options || {};
+  const headers = Object.assign({ Accept: "application/json" }, options.headers || {});
+  if (options.body != null && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  const key = getAccessKey();
+  if (key) headers["Authorization"] = "Bearer " + key;
+  let r = await fetch("./api/" + path, {
+    method: options.method || "GET",
+    headers,
+    body: options.body == null ? undefined
+      : (typeof options.body === "string" ? options.body : JSON.stringify(options.body))
+  });
+  if (r.status === 401 && !options._retried) {
+    const entered = await requestAccessKey();
+    if (entered == null) throw new Error("未登录或登录已过期：请先登录 Nekro WebUI 后台，再刷新本页");
+    return api(path, Object.assign({}, options, {
+      _retried: true,
+      headers: Object.assign({}, options.headers || {}, { Authorization: "Bearer " + entered })
+    }));
   }
-  let data;
-  try { data = await r.json(); } catch (e) { throw new Error("响应解析失败 (HTTP " + r.status + ")"); }
+  let data = null;
+  try { data = await r.json(); } catch (e) { data = null; }
   if (data && data.error) throw new Error(data.error);
   if (!r.ok) throw new Error("HTTP " + r.status);
   return data;
 }
-function post(path, body) {
-  return api(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-async function postForm(path, formData) {
-  const headers = {};
-  const token = getNekroToken();
-  if (token) headers["Authorization"] = "Bearer " + token;
-  const r = await fetch(path, { method: "POST", headers, body: formData });
-  let data;
-  try { data = await r.json(); } catch (e) { throw new Error("响应解析失败 (HTTP " + r.status + ")"); }
-  if (data && (data.error || data.detail)) throw new Error(data.error || data.detail);
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  return data;
-}
-function esc(s) {
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-function pad2(n) { return String(n).padStart(2, "0"); }
-function fmtTs(ts) {
-  if (!ts) return "—";
-  const d = new Date(Number(ts) * 1000);
-  if (isNaN(d.getTime())) return "—";
-  return pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
-}
-function toast(msg, type) {
-  const box = document.getElementById("toast-box");
-  const el = document.createElement("div");
-  el.className = "toast " + (type || "");
-  el.textContent = msg;
-  box.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
-}
-function setLoading(btn, loading, label) {
-  if (!btn) return;
-  btn.disabled = loading;
-  if (loading) {
-    btn.dataset.label = btn.textContent;
-    btn.innerHTML = '<span class="spinner"></span>' + esc(label || "处理中…");
-  } else {
-    btn.textContent = btn.dataset.label || btn.textContent;
-  }
+
+function requestAccessKey() {
+  if (state.authPromise) return state.authPromise;
+  state.authPromise = Promise.resolve(prompt(
+    "需要 Nekro WebUI 登录态（localStorage 中的 JWT）。\n可直接粘贴 access_token："
+  ) || null);
+  return state.authPromise;
 }
 
-// ===== 标签页 =====
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
-    if (btn.dataset.tab === "life") loadLife();
-    if (btn.dataset.tab === "users") loadUsers();
-    if (btn.dataset.tab === "visuals") loadVisuals();
-    if (btn.dataset.tab === "overview") loadOverview();
+/* ================= 页面切换 ================= */
+function activateTab(name) {
+  state.tab = name;
+  $$(".nav-item[data-page]").forEach(b => {
+    const on = b.dataset.page === name;
+    b.classList.toggle("active", on);
+    if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
-});
+  $$(".page").forEach(p => p.classList.toggle("active", p.dataset.page === name));
+  if (name === "overview") loadOverview();
+  if (name === "users") loadUsers();
+  if (name === "life") loadLife();
+  if (name === "content") loadContent();
+  $("#refresh-hint").textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
 
-// ===== 总览 =====
+/* ================= 总览 ================= */
 async function loadOverview() {
+  const seq = ++state.seq.overview;
+  const body = $("#overview-body");
   try {
-    const d = await api("api/overview");
-    document.getElementById("ov-date").textContent = d.date || "—";
-    document.getElementById("ov-mood").textContent = d.mood || "—";
-    document.getElementById("ov-plan-summary").textContent = d.plan_summary || "今日日程还未生成";
-    document.getElementById("ov-afterglow").textContent = d.dream_afterglow || "无";
-    document.getElementById("ov-user-count").textContent = d.target_user_count;
-    document.getElementById("ov-diary-date").textContent = d.latest_diary_date || "暂无";
+    const [ov, bs] = await Promise.all([api("overview"), api("bot-state")]);
+    if (seq !== state.seq.overview) return;
+    const plan = (bs && bs.plan) || {};
+    const st = (bs && bs.state) || {};
+    const dream = (bs && bs.dream) || {};
+    const diary = (bs && bs.diaries) || [];
 
-    // 能量：数字则画条，否则显示文本
-    const energyNum = parseFloat(d.current_energy);
-    const bar = document.getElementById("ov-energy-bar");
-    const txt = document.getElementById("ov-energy-text");
-    if (!isNaN(energyNum)) {
-      const pct = Math.max(0, Math.min(100, energyNum <= 1 ? energyNum * 100 : energyNum));
-      bar.style.width = pct + "%";
-      txt.textContent = Math.round(pct) + " / 100";
+    const cards = [
+      { label: "陪伴对象", value: ov.target_user_count, hint: "配置中的目标用户数" },
+      { label: "今日 Token", value: ov.token_usage_today, hint: "生活系统当日调用量",
+        meter: ov.daily_token_limit ? Math.min(100, Math.round((ov.token_usage_today / ov.daily_token_limit) * 100)) : null },
+      { label: "主动陪伴", value: ov.proactive_enabled ? "启用" : "关闭", small: true,
+        hint: ov.proactive_enabled ? "调度器运行中" : "已停止主动发消息" },
+      { label: "注入", value: ov.inject_enabled ? "启用" : "关闭", small: true,
+        hint: ov.inject_enabled ? "生活状态注入对话" : "不注入生活状态" },
+      { label: "最近日记", value: (diary.length ? diary[diary.length - 1].date : "—") || "—", small: true,
+        hint: diary.length ? "生活日记已记录" : "暂无日记" }
+    ];
+    $("#overview-metrics").innerHTML = cards.map(c => `
+      <div class="metric">
+        <div class="label">${esc(c.label)}</div>
+        <div class="value${c.small ? " small" : ""}">${esc(c.value)}</div>
+        <div class="hint">${esc(c.hint)}</div>
+        ${c.meter != null ? `<div class="meter"><span style="width:${c.meter}%"></span></div>` : ""}
+      </div>`).join("");
+
+    $("#ov-plan-date").textContent = (bs && bs.date) || "";
+    const segs = plan.segments || plan.events || [];
+    if (segs.length) {
+      $("#ov-plan").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr>
+        <th>时间</th><th>安排</th><th>心情</th></tr></thead><tbody>${segs.map(s => `<tr>
+        <td class="cell-id">${esc(s.window || "")}</td><td>${esc(s.activity || "")}</td>
+        <td>${esc(s.mood || "")}</td></tr>`).join("")}</tbody></table></div>`
+        + (plan.summary ? `<p class="hint" style="margin:10px 0 0">${esc(plan.summary)}</p>` : "");
     } else {
-      bar.style.width = "0%";
-      txt.textContent = d.current_energy || "—";
+      $("#ov-plan").innerHTML = `<div class="empty">${esc(plan.summary || "今日暂无日程，可在操作页重新生成")}</div>`;
     }
 
-    // 身体状态 chips
-    const condBox = document.getElementById("ov-conditions");
-    const conds = Array.isArray(d.conditions) ? d.conditions : [];
-    condBox.innerHTML = conds.length
-      ? conds.map((c) => '<span class="chip pink">' + esc(c.label || c) + (c.strength ? " · " + esc(c.strength) : "") + "</span>").join("")
-      : '<span class="placeholder">一切正常</span>';
-
-    // token
-    const usage = d.token_usage_today || {};
-    document.getElementById("ov-token-total").textContent = (usage.total || 0).toLocaleString();
-    document.getElementById("ov-token-calls").textContent = usage.calls || 0;
-    const byTask = usage.by_task || {};
-    document.getElementById("ov-token-tasks").innerHTML = Object.keys(byTask).length
-      ? Object.entries(byTask).map(([k, v]) => '<span class="chip">' + esc(k) + " " + Number(v).toLocaleString() + "</span>").join("")
-      : "";
-
-    // 顶部 pill
-    const pp = document.getElementById("pill-proactive");
-    pp.textContent = "主动陪伴 " + (d.proactive_enabled ? "开启" : "关闭");
-    pp.className = "pill " + (d.proactive_enabled ? "on" : "off");
-    const pi = document.getElementById("pill-inject");
-    pi.textContent = "状态注入 " + (d.inject_enabled ? "开启" : "关闭");
-    pi.className = "pill " + (d.inject_enabled ? "on" : "off");
+    const chips = [];
+    if (st.energy) chips.push(`<span class="chip info">能量 ${esc(st.energy)}</span>`);
+    if (st.mood) chips.push(`<span class="chip ok">心情 ${esc(st.mood)}</span>`);
+    (st.conditions || []).forEach(c => chips.push(`<span class="chip warn">${esc(c)}</span>`));
+    if (!chips.length) chips.push('<span class="chip">暂无状态</span>');
+    $("#ov-state").innerHTML = chips.join("");
+    $("#ov-dream").textContent = dream.afterglow
+      ? "梦境余韵：" + dream.afterglow
+      : "今日暂无梦境记录";
   } catch (e) {
-    toast("总览加载失败: " + e.message, "err");
+    if (seq !== state.seq.overview) return;
+    body.innerHTML = `<div class="card"><div class="error-box">加载失败：${esc(e.message)}
+      <button class="btn small" data-act="retry-overview" type="button">重试</button></div></div>`;
   }
 }
 
-// ===== 陪伴对象 =====
-function topicLabel(kind) {
-  const labels = {
-    follow_up: "关心追问",
-    share_activity: "分享日常",
-    condition: "状态吐槽",
-    dream: "聊梦境",
-    miss_you: "想找你",
-    greeting_morning: "早安问候",
-    greeting_evening: "晚安问候"
-  };
-  return labels[kind] || kind || "—";
-}
-
-function displayUserName(u) {
-  const remark = String(u.remark || "").trim();
-  const nickname = String(u.nickname || "").trim();
-  if (remark) return remark;
-  if (nickname) return nickname;
-  return "未命名";
-}
-
-function renderUserCard(u) {
-  const quotaMax = u.quota_max || 0;
-  const score = Math.max(0, Math.min(100, Number(u.relationship_score) || 0));
-  const statusBadge = !u.enabled
-    ? '<span class="badge off">已停用</span>'
-    : (u.should_send_now ? '<span class="badge ok">可主动</span>' : '<span class="badge no">暂不主动</span>');
-  return (
-    '<div class="user-card">' +
-      '<div class="user-head">' +
-        '<div><span class="user-name">' + esc(displayUserName(u)) + '</span><span class="user-qq">QQ ' + esc(u.user_id) + "</span></div>" +
-        statusBadge +
-      "</div>" +
-      '<div class="reason-line">' + esc(u.reason || (u.should_send_now ? "条件满足，可发起主动陪伴" : "—")) + "</div>" +
-      '<div style="margin-bottom:12px"><div class="muted">关系分 ' + score + ' / 100</div><div class="bar"><div class="bar-fill" style="width:' + score + '%"></div></div></div>' +
-      '<div class="user-meta">' +
-        '<div class="meta-item"><div class="label">今日配额</div><div class="value">' + (u.quota_used || 0) + " / " + quotaMax + "</div></div>" +
-        '<div class="meta-item"><div class="label">连续被忽视</div><div class="value">' + (u.ignored_streak || 0) + " 次</div></div>" +
-        '<div class="meta-item"><div class="label">最近主动</div><div class="value">' + fmtTs(u.last_sent_ts) + "</div></div>" +
-        '<div class="meta-item"><div class="label">最近主动类型</div><div class="value">' + esc(topicLabel(u.last_sent_topic)) + "</div></div>" +
-        '<div class="meta-item"><div class="label">用户最近发言</div><div class="value">' + fmtTs(u.last_user_msg_ts) + "</div></div>" +
-        '<div class="meta-item"><div class="label">累计 发送/回应</div><div class="value">' + (u.total_sent || 0) + " / " + (u.total_replied || 0) + "</div></div>" +
-      "</div>" +
-      '<div class="user-actions">' +
-        '<button class="btn small" onclick="userAction(\'' + esc(u.user_id) + "', '" + (u.enabled ? "disable" : "enable") + '\', this)">' + (u.enabled ? "停用" : "启用") + "</button>" +
-        '<button class="btn small" onclick="userAction(\'' + esc(u.user_id) + '\', \'reset_quota\', this)">重置配额</button>' +
-        '<button class="btn small" onclick="userAction(\'' + esc(u.user_id) + '\', \'reset_ignored\', this)">清零忽视</button>' +
-        '<button class="btn small primary" onclick="proactiveTest(\'' + esc(u.user_id) + '\', this)">立即主动</button>' +
-      "</div>" +
-      '<div class="user-actions" style="margin-top:8px">' +
-        '<input class="input" style="max-width:150px" id="remark-' + esc(u.user_id) + '" value="' + esc(u.remark || "") + '" placeholder="后台备注">' +
-        '<input class="input" style="max-width:150px" id="nickname-' + esc(u.user_id) + '" value="' + esc(u.nickname || "") + '" placeholder="聊天称呼">' +
-        '<button class="btn small" onclick="saveProfile(\'' + esc(u.user_id) + '\', this)">保存备注</button>' +
-      "</div>" +
-    "</div>"
-  );
-}
-
+/* ================= 陪伴对象 ================= */
 async function loadUsers() {
-  const box = document.getElementById("users-list");
+  const seq = ++state.seq.users;
+  const body = $("#users-body");
   try {
-    const users = await api("api/users");
-    if (!Array.isArray(users) || users.length === 0) {
-      box.innerHTML = '<div class="card"><div class="placeholder">尚未配置陪伴对象，请在插件配置中填写 TARGET_USER_IDS</div></div>';
+    const d = await api("users");
+    if (seq !== state.seq.users) return;
+    state.users = (d && d.users) || [];
+    if (!state.users.length) {
+      body.innerHTML = '<div class="card"><div class="empty">尚未配置陪伴对象，请在插件配置中填写 TARGET_USER_IDS</div></div>';
       return;
     }
-    box.innerHTML = users.map(renderUserCard).join("");
+    body.innerHTML = `<div class="card"><div class="table-wrap"><table class="data"><thead><tr>
+      <th>QQ</th><th>备注</th><th>称呼</th><th>状态</th><th>额度</th><th>操作</th></tr></thead><tbody>
+      ${state.users.map((u, i) => `<tr>
+        <td class="cell-id">${esc(u.user_id)}</td>
+        <td class="cell-cut">${esc(u.remark || "—")}</td>
+        <td>${esc(u.nickname || "—")}</td>
+        <td>${u.enabled ? '<span class="chip ok">启用</span>' : '<span class="chip err">停用</span>'}</td>
+        <td class="cell-id">${esc(u.daily_sent == null ? "—" : u.daily_sent + "/" + (u.daily_quota == null ? "?" : u.daily_quota))}</td>
+        <td class="actions">
+          <button class="btn small" data-act="user-edit" data-i="${i}" type="button">档案</button>
+          <button class="btn small" data-act="user-toggle" data-i="${i}" type="button">${u.enabled ? "停用" : "启用"}</button>
+          <button class="btn small" data-act="user-quota" data-i="${i}" type="button">重置额度</button>
+          <button class="btn small" data-act="user-test" data-i="${i}" type="button">测试</button>
+        </td></tr>`).join("")}
+      </tbody></table></div></div>`;
   } catch (e) {
-    box.innerHTML = '<div class="card"><div class="placeholder">加载失败: ' + esc(e.message) + "</div></div>";
+    if (seq !== state.seq.users) return;
+    body.innerHTML = `<div class="card"><div class="error-box">加载失败：${esc(e.message)}
+      <button class="btn small" data-act="retry-users" type="button">重试</button></div></div>`;
   }
 }
 
-async function saveProfile(userId, btn) {
-  const remark = document.getElementById("remark-" + userId)?.value || "";
-  const nickname = document.getElementById("nickname-" + userId)?.value || "";
+/* ================= 生活记录 ================= */
+async function loadLife() {
+  const seq = ++state.seq.life;
   try {
-    btn && (btn.disabled = true);
-    const r = await post("api/user/update", { user_id: userId, action: "save_profile", remark, nickname });
-    if (r.error) throw new Error(r.error);
-    toast("已保存备注", "ok");
-    await loadUsers();
+    const bs = await api("bot-state");
+    if (seq !== state.seq.life) return;
+    $("#life-date").textContent = (bs && bs.date) || "";
+    const d = bs || {};
+    const rows = [];
+    const plan = d.plan || {};
+    if (plan.summary) rows.push(`<div><strong>日程</strong><p class="hint" style="margin:6px 0 0">${esc(plan.summary)}</p></div>`);
+    (plan.segments || plan.events || []).forEach(s => rows.push(
+      `<div class="op-row"><span class="cell-id">${esc(s.window || "")}</span><span>${esc(s.activity || "")}</span></div>`));
+    const st = d.state || {};
+    if (st.energy || st.mood) rows.push(
+      `<div class="chips" style="margin-top:8px">
+        ${st.energy ? `<span class="chip info">能量 ${esc(st.energy)}</span>` : ""}
+        ${st.mood ? `<span class="chip ok">心情 ${esc(st.mood)}</span>` : ""}
+        ${(st.conditions || []).map(c => `<span class="chip warn">${esc(c)}</span>`).join("")}
+      </div>`);
+    const dr = d.dream || {};
+    if (dr.afterglow) rows.push(`<div style="margin-top:8px"><strong>梦境余韵</strong><p class="hint" style="margin:6px 0 0">${esc(dr.afterglow)}</p></div>`);
+    const diaries = d.diaries || [];
+    if (diaries.length) rows.push(`<div style="margin-top:8px"><strong>日记（${diaries.length} 篇）</strong>
+      ${diaries.slice(-5).reverse().map(x => `<div class="op-row"><span class="cell-id">${esc(x.date)}</span><span class="cell-cut">${esc(x.text || "")}</span></div>`).join("")}</div>`);
+    $("#life-body").innerHTML = rows.length ? rows.join("") : '<div class="empty">暂无生活记录</div>';
   } catch (e) {
-    toast("保存失败: " + e.message, "err");
-  } finally {
-    btn && (btn.disabled = false);
+    if (seq !== state.seq.life) return;
+    $("#life-body").innerHTML = `<div class="error-box">加载失败：${esc(e.message)}</div>`;
   }
 }
 
-async function userAction(userId, action, btn) {
+async function loadPreview(btn) {
+  const seq = ++state.seq.preview;
+  const ta = $("#inject-preview");
+  ta.textContent = "渲染中…";
   setLoading(btn, true);
   try {
-    await post("api/user/update", { user_id: userId, action: action });
-    toast("操作成功", "ok");
+    const d = await api("inject-preview");
+    if (seq !== state.seq.preview) return;
+    ta.textContent = (d && d.text) || "（当前没有可注入的文本）";
   } catch (e) {
-    toast("操作失败: " + e.message, "err");
+    if (seq !== state.seq.preview) return;
+    ta.textContent = "加载失败：" + e.message;
+  } finally {
+    setLoading(btn, false);
   }
-  await loadUsers();
 }
 
-async function proactiveTest(userId, btn) {
-  if (!confirm("确定要立即对 " + userId + " 发起一次主动陪伴吗？\n（将占用今日配额并真实发送消息）")) return;
-  setLoading(btn, true, "触发中…");
+/* ================= 角色内容 ================= */
+async function loadContent() {
+  const seq = ++state.seq.content;
   try {
-    const r = await post("api/proactive/test", { user_id: userId });
-    const motive = typeof r.motivation === "string" ? r.motivation : JSON.stringify(r.motivation);
-    if (r.success) toast("已触发主动陪伴：" + (motive || "（无动机说明）"), "ok");
-    else toast("触发未成功：" + (motive || "未知原因"), "err");
+    const d = await api("content");
+    if (seq !== state.seq.content) return;
+    state.content = (d && d.content) || {};
+    const c = state.content;
+    $("#world-stage-input").value = c.world_stage || "";
+    $("#world-chars").textContent = (c.world_stage || "").length + " 字";
+    renderPool("scenes");
+    renderPool("events");
   } catch (e) {
-    toast("触发失败: " + e.message, "err");
+    if (seq !== state.seq.content) return;
+    toast("角色内容加载失败：" + e.message, "err");
   }
-  await loadUsers();
 }
 
-// ===== 生活记录 =====
-async function loadLife() {
+function renderPool(kind) {
+  const c = state.content || {};
+  const items = (kind === "scenes" ? c.scenes : c.events) || [];
+  const box = $(kind === "scenes" ? "#scenes-body" : "#events-body");
+  if (!items.length) { box.innerHTML = '<div class="empty">暂无条目，点击右上角「新建」</div>'; return; }
+  const isScene = kind === "scenes";
+  box.innerHTML = `<div class="table-wrap"><table class="data"><thead><tr>
+    <th>${isScene ? "场景" : "事件"}</th><th>${isScene ? "描述" : "简述"}</th><th>操作</th></tr></thead><tbody>
+    ${items.map((it, i) => `<tr>
+      <td><div>${esc(it.title || "(未命名)")}</div><div class="cell-id">${esc(it.id)}</div></td>
+      <td class="cell-cut">${esc(it.setting || it.blurb || "")}</td>
+      <td class="actions"><button class="btn small" data-act="pool-edit" data-kind="${kind}" data-i="${i}" type="button">编辑</button></td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function openPoolDialog(kind, index) {
+  state.pool.kind = kind;
+  state.pool.index = index;
+  const c = state.content || {};
+  const items = (kind === "scenes" ? c.scenes : c.events) || [];
+  const it = index >= 0 ? items[index] : null;
+  const isScene = kind === "scenes";
+  $("#pool-dialog-title").textContent = (it ? "编辑" : "新建") + (isScene ? "场景" : "事件");
+  $("#pool-title-label").textContent = isScene ? "场景标题" : "事件简述";
+  $("#pool-setting-field").hidden = !isScene;
+  $("#pool-id").value = it ? it.id : "";
+  $("#pool-title").value = it ? (it.title || it.blurb || "") : "";
+  $("#pool-setting").value = it ? (it.setting || "") : "";
+  $("#pool-id").disabled = !!it;
+  $("#pool-delete").hidden = !it;
+  $("#pool-dialog-hint").textContent = it ? "ID 保存后不可修改" : "";
+  $("#pool-dialog").showModal();
+}
+
+async function saveWorld(btn) {
+  const ws = $("#world-stage-input").value.trim();
+  if (!ws) { toast("世界观文本不能为空", "err"); return; }
+  setLoading(btn, true);
   try {
-    const st = await api("api/bot-state");
-    // 日程时间线
-    const events = (st.plan && Array.isArray(st.plan.events)) ? st.plan.events : [];
-    document.getElementById("life-timeline").innerHTML = events.length
-      ? '<div class="timeline">' + events.map((ev) =>
-          '<div class="tl-item"><div class="tl-window">' + esc(ev.window || "?") + '</div>' +
-          '<div class="tl-activity">' + esc(ev.activity || "") + "</div>" +
-          (ev.mood ? '<div class="tl-mood">' + esc(ev.mood) + "</div>" : "") +
-          "</div>").join("") + "</div>"
-      : '<div class="placeholder">暂无日程，可在「操作」页重新生成</div>';
-
-    // 梦境
-    const dream = st.dream || {};
-    document.getElementById("life-dream").innerHTML = dream.content
-      ? '<div class="muted" style="margin-bottom:6px">' + esc(dream.date || "") + (dream.mood ? " · " + esc(dream.mood) : "") + "</div>" +
-        '<div class="dream-box">' + esc(dream.content) + "</div>" +
-        (dream.afterglow ? '<div class="muted" style="margin-top:8px">余韵：' + esc(dream.afterglow) + "</div>" : "")
-      : '<div class="placeholder">暂无梦境记录</div>';
-
-    // 日记（倒序，可展开）
-    const diaries = Array.isArray(st.diaries) ? st.diaries.slice().reverse() : [];
-    document.getElementById("life-diaries").innerHTML = diaries.length
-      ? diaries.map((d, i) =>
-          '<div class="diary-item" id="diary-' + i + '">' +
-            '<div class="diary-head" onclick="document.getElementById(\'diary-' + i + '\').classList.toggle(\'open\')">' +
-              '<span class="diary-date">' + esc(d.date || "未知日期") + "</span>" +
-              '<span class="diary-arrow">▶</span>' +
-            "</div>" +
-            '<div class="diary-body">' + esc(d.content || "（空）") + "</div>" +
-          "</div>").join("")
-      : '<div class="placeholder">还没有日记</div>';
+    const r = await api("content/world", { method: "POST", body: { world_stage: ws } });
+    if (!r || r.success !== true) throw new Error((r && r.error) || "保存失败");
+    $("#world-chars").textContent = ws.length + " 字";
+    toast(r.reloaded ? "世界观已保存并热重载 ✅" : "世界观已落盘，但热重载失败（重启后生效）", r.reloaded ? "ok" : "warn");
   } catch (e) {
-    toast("生活记录加载失败: " + e.message, "err");
+    toast("保存失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
   }
 }
 
-// ===== 视觉资产 =====
-async function renderVisualImage(boxId, relPath, placeholder) {
-  const box = document.getElementById(boxId);
-  if (!relPath) {
-    box.innerHTML = '<div class="placeholder">❌ ' + esc(placeholder || "暂无图片") + '</div>';
-    return false;
+async function savePool(btn) {
+  const kind = state.pool.kind, idx = state.pool.index;
+  const id = $("#pool-id").value.trim();
+  const title = $("#pool-title").value.trim();
+  const setting = $("#pool-setting").value.trim();
+  const isScene = kind === "scenes";
+  if (!id) { toast("ID 不能为空", "err"); return; }
+  if (!title) { toast(isScene ? "场景标题不能为空" : "事件简述不能为空", "err"); return; }
+  if (isScene && !setting) { toast("场景描述不能为空", "err"); return; }
+
+  const c = state.content || {};
+  const items = (isScene ? (c.scenes || []) : (c.events || [])).slice();
+  if (idx >= 0) {
+    items[idx] = isScene ? { id: items[idx].id, title, setting } : { id: items[idx].id, blurb: title };
+  } else {
+    if (items.some(x => x.id === id)) { toast("ID 已存在，请换一个", "err"); return; }
+    items.push(isScene ? { id, title, setting } : { id, blurb: title });
   }
-  box.innerHTML = '<div class="placeholder">正在加载图片预览…</div>';
+  setLoading(btn, true);
+  try {
+    const r = await api("content/pool", { method: "POST", body: { kind: kind.toUpperCase(), items } });
+    if (!r || r.success !== true) throw new Error((r && r.error) || "保存失败");
+    if (isScene) c.scenes = items; else c.events = items;
+    state.content = c;
+    renderPool(kind);
+    toast(r.reloaded ? `已保存 ${r.count} 条并热重载 ✅` : "已落盘，但热重载失败（重启后生效）", r.reloaded ? "ok" : "warn");
+    $("#pool-dialog").close();
+  } catch (e) {
+    toast("保存失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+async function deletePool(btn) {
+  const kind = state.pool.kind, idx = state.pool.index;
+  if (idx < 0) return;
+  if (!confirm("确定删除该条目？保存后会立即生效。")) return;
+  const c = state.content || {};
+  const items = (kind === "scenes" ? (c.scenes || []) : (c.events || [])).slice();
+  items.splice(idx, 1);
+  setLoading(btn, true);
+  try {
+    const r = await api("content/pool", { method: "POST", body: { kind: kind.toUpperCase(), items } });
+    if (!r || r.success !== true) throw new Error((r && r.error) || "删除失败");
+    if (kind === "scenes") c.scenes = items; else c.events = items;
+    state.content = c;
+    renderPool(kind);
+    toast("已删除并热重载", "ok");
+    $("#pool-dialog").close();
+  } catch (e) {
+    toast("删除失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+/* ================= 陪伴对象动作 ================= */
+async function userUpdate(i, action, btn) {
+  const u = (state.users || [])[i];
+  if (!u) return;
+  setLoading(btn, true);
+  try {
+    const body = { user_id: u.user_id, action };
+    if (action === "save_profile") {
+      body.remark = $("#user-remark").value;
+      body.nickname = $("#user-nickname").value;
+    }
+    await api("user/update", { method: "POST", body });
+    toast("已更新", "ok");
+    if (action === "save_profile") $("#user-dialog").close();
+    await loadUsers();
+  } catch (e) {
+    toast("操作失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+function openUserDialog(i) {
+  const u = (state.users || [])[i];
+  if (!u) return;
+  $("#user-qq").value = u.user_id;
+  $("#user-qq").disabled = true;
+  $("#user-remark").value = u.remark || "";
+  $("#user-nickname").value = u.nickname || "";
+  $("#user-dialog-hint").textContent = "";
+  $("#user-save").dataset.i = String(i);
+  $("#user-dialog").showModal();
+}
+
+async function regen(target, btn) {
+  const body = { target };
+  if (target === "plan") {
+    const mn = $("#regen-min-seg").value.trim();
+    const mx = $("#regen-max-seg").value.trim();
+    if (mn) body.min_segments = Number(mn);
+    if (mx) body.max_segments = Number(mx);
+  }
+  setLoading(btn, true);
+  try {
+    const r = await api("state/regenerate", { method: "POST", body });
+    if (!r || r.success !== true) throw new Error((r && r.error) || "生成失败");
+    toast(`已重新生成${target === "plan" ? "日程" : target === "state" ? "状态" : "梦境"}`, "ok");
+    await loadOverview();
+    if (state.tab === "life") await loadLife();
+  } catch (e) {
+    toast("生成失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+/* ================= 人设包导入导出 ================= */
+async function exportBundle(btn) {
+  const out = $("#persona-pack-result");
+  setLoading(btn, true);
+  if (out) out.textContent = "导出中…";
   try {
     const headers = {};
-    const token = getNekroToken();
-    if (token) headers["Authorization"] = "Bearer " + token;
-    const r = await fetch("api/visuals/image/" + encodeURI(relPath) + "?t=" + Date.now(), { headers });
+    const key = getNekroToken();
+    if (key) headers["Authorization"] = "Bearer " + key;
+    const r = await fetch("./api/backup/export", { headers });
+    if (r.status === 401 || r.status === 403) throw new Error("未登录或登录已过期，请先登录 Nekro WebUI 后台");
     if (!r.ok) throw new Error("HTTP " + r.status);
     const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    box.innerHTML = '<img class="visual-preview" src="' + url + '" alt="visual image">';
-    return true;
+    const m = (r.headers.get("content-disposition") || "").match(/filename="?([^";]+)"?/);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? m[1] : "companion_bundle.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    if (out) out.textContent = "已导出";
+    toast("已导出整套人设（zip）", "ok");
   } catch (e) {
-    box.innerHTML = '<div class="placeholder">⚠️ 图片存在但预览加载失败：' + esc(e.message) + '</div>';
-    return false;
+    if (out) out.textContent = "失败";
+    toast("导出失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
   }
 }
 
-function setPersonaStatus(profile, previewOk) {
-  const meta = document.getElementById("visual-persona-meta");
-  if (!profile || !profile.reference_image || !profile.image_sha256) {
-    meta.textContent = "状态：未上传人设参考图";
-    return;
-  }
-  meta.textContent = "状态：已上传" + (previewOk ? "，预览正常" : "，但预览未加载") + " · 路径：" + profile.reference_image + " · sha256：" + (profile.image_sha256 || "—");
-}
-
-async function loadVisuals() {
+async function importBundle(btn) {
+  const out = $("#persona-pack-result");
+  const input = $("#persona-import-file");
+  const file = (input && input.files && input.files[0]) || null;
+  if (!file) { toast("请先选择 .zip 包", "err"); return; }
+  if (!confirm("导入会覆盖世界观与场景/事件池、触发词别名（会先自动备份）。确定继续？")) return;
+  setLoading(btn, true);
+  if (out) out.textContent = "导入中…";
   try {
-    const p = await api("api/visuals/profile");
-    document.getElementById("visual-character").value = p.character_prompt || "";
-    document.getElementById("visual-style").value = p.style_prompt || "";
-    document.getElementById("visual-negative").value = p.negative_prompt || "";
-    document.getElementById("visual-seed").value = p.seed_hint || "";
-    const hasImage = !!(p.reference_image && p.image_sha256);
-    const previewOk = hasImage ? await renderVisualImage("visual-persona-preview", p.reference_image, "还没有上传人设图") : false;
-    if (!hasImage) await renderVisualImage("visual-persona-preview", "", "还没有上传人设图");
-    setPersonaStatus(p, previewOk);
-    await loadScheduleSelfies();
+    const headers = { "Content-Type": "application/zip" };
+    const key = getNekroToken();
+    if (key) headers["Authorization"] = "Bearer " + key;
+    const r = await fetch("./api/backup/import", { method: "POST", headers, body: file });
+    let data = null;
+    try { data = await r.json(); } catch (e) { data = null; }
+    if (!r.ok || !data || data.success !== true) throw new Error((data && data.error) || ("HTTP " + r.status));
+    const parts = [];
+    if (data.applied && data.applied.length) parts.push("覆盖 " + data.applied.join("、"));
+    if (data.config_applied && data.config_applied.length) parts.push("配置 " + data.config_applied.join("、"));
+    if (data.reload_error) parts.push("重载告警：" + data.reload_error);
+    const msg = parts.join("；") || "无可导入内容";
+    if (out) out.textContent = msg;
+    toast("导入成功：" + msg, "ok");
+    await loadContent();
   } catch (e) {
-    toast("视觉人设加载失败: " + e.message, "err");
+    if (out) out.textContent = "失败";
+    toast("导入失败：" + e.message, "err");
+  } finally {
+    setLoading(btn, false);
   }
 }
 
-async function saveVisualProfile() {
-  const btn = document.getElementById("btn-save-visual-profile");
-  setLoading(btn, true, "保存中…");
-  try {
-    await post("api/visuals/profile", {
-      character_prompt: document.getElementById("visual-character").value || "",
-      style_prompt: document.getElementById("visual-style").value || "",
-      negative_prompt: document.getElementById("visual-negative").value || "",
-      seed_hint: document.getElementById("visual-seed").value || "",
-    });
-    toast("视觉人设已保存", "ok");
-    await loadVisuals();
-  } catch (e) {
-    toast("保存失败: " + e.message, "err");
-  }
-  setLoading(btn, false);
+/* ================= 主题 ================= */
+function applyTheme(mode) {
+  document.documentElement.classList.toggle("day-mode", mode === "day");
+  $("#btn-theme").textContent = mode === "day" ? "夜间" : "日间";
+  try { localStorage.setItem("npc-theme", mode); } catch (e) { /* ignore */ }
 }
 
-async function uploadPersonaImage() {
-  const btn = document.getElementById("btn-upload-persona");
-  const file = document.getElementById("persona-file").files[0];
-  if (!file) { toast("请选择图片文件", "err"); return; }
-  setLoading(btn, true, "上传中…");
-  try {
-    const fd = new FormData();
-    fd.append("file", file);
-    await postForm("api/visuals/persona-image", fd);
-    toast("人设图已上传", "ok");
-    await loadVisuals();
-  } catch (e) {
-    toast("上传失败: " + e.message, "err");
-  }
-  setLoading(btn, false);
-}
+/* ================= 事件绑定 ================= */
+function wire() {
+  $$(".nav-item[data-page]").forEach(b =>
+    b.addEventListener("click", () => activateTab(b.dataset.page)));
 
-let selfieProgressTimer = null;
-function setSelfieProgress(status, pct, startedAt, done) {
-  const box = document.getElementById("visual-selfie-progress");
-  const text = document.getElementById("visual-selfie-progress-text");
-  const time = document.getElementById("visual-selfie-progress-time");
-  const bar = document.getElementById("visual-selfie-progress-bar");
-  box.classList.add("show");
-  box.classList.toggle("indeterminate", !done && pct == null);
-  text.textContent = status || "生成中…";
-  if (pct != null) bar.style.width = Math.max(0, Math.min(100, pct)) + "%";
-  const sec = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0;
-  time.textContent = sec + "s";
-}
-function stopSelfieProgress() {
-  if (selfieProgressTimer) clearInterval(selfieProgressTimer);
-  selfieProgressTimer = null;
-}
+  $("#btn-theme").addEventListener("click", () =>
+    applyTheme(document.documentElement.classList.contains("day-mode") ? "dark" : "day"));
+  $("#btn-refresh").addEventListener("click", () => {
+    if (state.tab === "overview") loadOverview();
+    if (state.tab === "users") loadUsers();
+    if (state.tab === "life") loadLife();
+    if (state.tab === "content") loadContent();
+    toast("已刷新", "info");
+  });
 
-async function renderScheduleSelfies(items) {
-  const box = document.getElementById("visual-selfie-preview");
-  if (!items || !items.length) {
-    box.innerHTML = '<div class="placeholder">暂无今日日程，所以还没有自拍槽位</div>';
-    return;
-  }
-  box.innerHTML = items.map((it) => {
-    const status = it.exists ? "已生成" : "未生成";
-    return '<div class="schedule-selfie-card">' +
-      '<div class="time">' + esc(it.window || "未知时间") + ' · ' + status + '</div>' +
-      '<div class="activity">' + esc(it.activity || "日常活动") + '</div>' +
-      '<div class="mood">' + esc(it.mood || "") + '</div>' +
-      '<div class="schedule-selfie-imgbox" id="schedule-selfie-img-' + it.index + '">' +
-        (it.exists ? '正在加载预览…' : '还没拍这一段') +
-      '</div>' +
-    '</div>';
-  }).join("");
-  for (const it of items) {
-    if (!it.exists || !it.image) continue;
-    await renderVisualImage("schedule-selfie-img-" + it.index, it.image, "还没拍这一段");
-  }
-}
+  // 主区事件委托
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target;
+    const btn = t && t.closest ? t.closest("[data-act]") : null;
 
-async function loadScheduleSelfies() {
-  try {
-    const r = await api("api/visuals/schedule-selfies");
-    await renderScheduleSelfies(r.items || []);
-    document.getElementById("visual-selfie-meta").textContent = "日期：" + (r.date || "—") + " · 已生成：" + (r.generated || 0) + "/" + (r.total || 0) + " 张";
-  } catch (e) {
-    document.getElementById("visual-selfie-preview").innerHTML = '<div class="placeholder">加载失败：' + esc(e.message) + '</div>';
-  }
-}
-
-async function generateDaySelfies(force) {
-  const btn = document.getElementById(force ? "btn-regenerate-selfie" : "btn-generate-selfie");
-  const otherBtn = document.getElementById(force ? "btn-generate-selfie" : "btn-regenerate-selfie");
-  const startedAt = Date.now();
-  stopSelfieProgress();
-  setSelfieProgress(force ? "已提交重拍全部日程自拍，正在逐段调用绘图模型…" : "已提交今日全部日程自拍，正在检查缓存/逐段生成…", 5, startedAt, false);
-  document.getElementById("visual-selfie-meta").textContent = "生成中：会按今日日程每个时间段生成一张，可能需要比较久，请不要重复点击。";
-  setLoading(btn, true, force ? "重拍全部中…" : "生成全部中…");
-  if (otherBtn) otherBtn.disabled = true;
-  let tick = 0;
-  selfieProgressTimer = setInterval(() => {
-    tick += 1;
-    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    const hints = [
-      "正在读取今日日程并构建每段自拍提示词…",
-      "正在逐个时间段生成日常照片…",
-      "还在生成中，多时间段会比单张更慢…",
-      "正在等待剩余图片结果，请继续稍等…",
-    ];
-    const pct = Math.min(94, 8 + tick * 2);
-    setSelfieProgress(hints[Math.min(hints.length - 1, Math.floor(elapsed / 30))], pct, startedAt, false);
-  }, 1000);
-  try {
-    const r = await post("api/visuals/generate-day?force=" + (force ? "true" : "false"), {});
-    stopSelfieProgress();
-    setSelfieProgress("全部日程自拍处理完成，正在展示预览", 100, startedAt, true);
-    await renderScheduleSelfies(r.items || []);
-    const sec = Math.floor((Date.now() - startedAt) / 1000);
-    document.getElementById("visual-selfie-meta").textContent = "日期：" + (r.date || "—") + " · 已生成：" + (r.generated || 0) + "/" + (r.total || 0) + " 张 · 用时：" + sec + "s";
-    toast("今日全部日程自拍已处理，用时 " + sec + "s", "ok");
-  } catch (e) {
-    stopSelfieProgress();
-    setSelfieProgress("生成失败：" + e.message, 100, startedAt, true);
-    document.getElementById("visual-selfie-meta").textContent = "生成失败：" + e.message;
-    toast("生成日程自拍失败: " + e.message, "err");
-  }
-  setLoading(btn, false);
-  if (otherBtn) otherBtn.disabled = false;
-}
-
-// ===== 操作 =====
-const REGEN_NAMES = { plan: "日程", state: "状态", dream: "梦境", diary: "日记" };
-async function regen(target) {
-  const btn = document.getElementById("re-" + target);
-  const result = document.getElementById("re-" + target + "-result");
-  setLoading(btn, true, "生成中…");
-  result.textContent = "";
-  result.className = "op-result";
-  try {
-    const r = await post("api/state/regenerate", { target: target });
-    if (r.success) {
-      result.textContent = "生成成功";
-      result.classList.add("ok");
-      toast(REGEN_NAMES[target] + "已重新生成", "ok");
-    } else {
-      result.textContent = "生成失败（可能预算超限）";
-      result.classList.add("err");
-      toast(REGEN_NAMES[target] + "生成失败", "err");
+    if (btn) {
+      const act = btn.dataset.act;
+      if (act === "jump") activateTab(btn.dataset.page);
+      if (act === "retry-overview") loadOverview();
+      if (act === "retry-users") loadUsers();
+      if (act === "regen") regen(btn.dataset.target, btn);
+      if (act === "users-reload") loadUsers();
+      if (act === "pool-new") openPoolDialog(btn.dataset.kind, -1);
+      if (act === "pool-edit") openPoolDialog(btn.dataset.kind, Number(btn.dataset.i));
+      if (act === "user-edit") openUserDialog(Number(btn.dataset.i));
+      if (act === "user-toggle") userUpdate(Number(btn.dataset.i),
+        (state.users[Number(btn.dataset.i)] || {}).enabled ? "disable" : "enable", btn);
+      if (act === "user-quota") userUpdate(Number(btn.dataset.i), "reset_quota", btn);
+      if (act === "user-test") userUpdate(Number(btn.dataset.i), "trigger_test", btn);
+      if (act === "dialog-close") btn.closest("dialog") && btn.closest("dialog").close();
+      return;
     }
-  } catch (e) {
-    result.textContent = "失败: " + e.message;
-    result.classList.add("err");
-    toast(REGEN_NAMES[target] + "生成失败: " + e.message, "err");
-  }
-  setLoading(btn, false);
-  loadOverview();
-  loadLife();
+    // 关闭弹窗点击遮罩
+    const dlg = t && t.tagName === "DIALOG" ? t : null;
+    if (dlg && dlg.open) {
+      const r = dlg.getBoundingClientRect();
+      if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) dlg.close();
+    }
+  });
+
+  $("#btn-world-save").addEventListener("click", (e) => saveWorld(e.currentTarget));
+  $("#pool-save").addEventListener("click", (e) => savePool(e.currentTarget));
+  $("#pool-delete").addEventListener("click", (e) => deletePool(e.currentTarget));
+  $("#user-save").addEventListener("click", async (e) => {
+    const i = Number(e.currentTarget.dataset.i || -1);
+    if (i < 0) return;
+    const btn = e.currentTarget;
+    setLoading(btn, true);
+    try {
+      await api("user/update", {
+        method: "POST",
+        body: { user_id: (state.users[i] || {}).user_id, action: "save_profile",
+          remark: $("#user-remark").value, nickname: $("#user-nickname").value }
+      });
+      toast("档案已保存", "ok");
+      $("#user-dialog").close();
+      await loadUsers();
+    } catch (err) {
+      toast("保存失败：" + err.message, "err");
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+  $("#btn-persona-export").addEventListener("click", (e) => exportBundle(e.currentTarget));
+  $("#btn-persona-import").addEventListener("click", (e) => importBundle(e.currentTarget));
+  $("#btn-preview-refresh").addEventListener("click", (e) => loadPreview(e.currentTarget));
+  $("#btn-preview-copy").addEventListener("click", async () => {
+    const txt = $("#inject-preview").textContent || "";
+    if (!txt) { toast("暂无可复制的文本", "warn"); return; }
+    try {
+      await navigator.clipboard.writeText(txt);
+      toast("已复制到剪贴板", "ok");
+    } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); toast("已复制到剪贴板", "ok"); }
+      catch (e2) { toast("复制失败，请手动选择文本", "err"); }
+      ta.remove();
+    }
+  });
 }
 
-async function loadInjectPreview() {
-  const btn = document.getElementById("btn-preview");
-  const ta = document.getElementById("inject-preview");
-  setLoading(btn, true, "加载中…");
-  try {
-    const r = await api("api/inject-preview");
-    ta.value = r.text || "（注入文本为空）";
-  } catch (e) {
-    ta.value = "加载失败: " + e.message;
-  }
-  setLoading(btn, false);
-}
-
-// ===== 初始化与自动刷新 =====
-loadOverview();
-loadUsers();
-setInterval(() => {
-  loadOverview();
-  loadUsers();
-  document.getElementById("refresh-hint").textContent = "（更新于 " + fmtTs(Date.now() / 1000) + "）";
-}, 30000);
+/* ================= 启动 ================= */
+(function init() {
+  let theme = "dark";
+  try { theme = localStorage.getItem("npc-theme") || "dark"; } catch (e) { /* ignore */ }
+  applyTheme(theme);
+  wire();
+  activateTab("overview");
+  setInterval(() => {
+    if (state.tab === "overview") loadOverview();
+    if (state.tab === "users") loadUsers();
+    $("#refresh-hint").textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  }, 30000);
+})();
 </script>
+
 </body>
 </html>

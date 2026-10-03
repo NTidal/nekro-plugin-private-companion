@@ -4,7 +4,10 @@
 """
 
 import asyncio
+import json
+import re
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Tuple
 
 from nekro_agent.api.core import logger
@@ -17,7 +20,6 @@ from .plugin import get_config, plugin
 from .state import (
     current_plan_event,
     ensure_daily_state,
-    maybe_generate_diary_by_time,
     tick_state_decay,
 )
 
@@ -176,6 +178,203 @@ async def should_send(user_id: str, user_state: dict, bot_state: dict) -> Tuple[
     return True, "ok"
 
 
+# ============ 好感度门控：避开未解锁话题（本地补丁 NTidal） ============
+# 背景记忆条目带 min_favor：好感度未达标的话题不该由她主动提起
+# （主动提起等于自己泄底，比被动被问更糟）。
+# 直接读 nekro_persona 插件的记忆文件与好感度数据，不 import 对方插件。
+_TIER_FILES = (
+    "plugins/workdir/nekro_persona/backgrounds/tier1/core.json",
+    "plugins/workdir/nekro_persona/backgrounds/tier2/lore.json",
+)
+_locked_cache: dict = {"key": None, "data": []}
+
+
+# 触发词别名扩展：记忆条目里写的是书面词，对话/梦境里常出现口语变体。
+# 实测漏洞：条目触发词是「父母」，而生成文本说的是「爸妈」→ 漏匹配。
+_ALIAS_REL = ("plugin_data", "xiaojiu.private_companion", "trigger_aliases.json")
+_ALIAS_CACHE: dict = {"key": None}
+
+# 触发词别名：记忆条目里写的是书面词，对话/梦境里常出现口语变体。
+# 实测漏洞：条目触发词是「父母」，而生成文本说的是「爸妈」→ 漏匹配。
+# 内容存插件数据目录的 trigger_aliases.json（与导出包同名同格式），不写死在源码里。
+# 数据文件缺失时为空表：只是不做别名扩展，不影响功能。
+_TRIGGER_ALIASES: dict[str, list] = {}
+
+
+def aliases_path() -> Path:
+    """触发别名的数据文件路径。"""
+    from nekro_agent.core.os_env import OsEnv
+
+    return Path(OsEnv.DATA_DIR).joinpath(*_ALIAS_REL)
+
+
+def _apply_aliases(data: dict) -> None:
+    global _TRIGGER_ALIASES
+    _TRIGGER_ALIASES = {
+        str(k): [str(y) for y in v]
+        for k, v in (data or {}).items()
+        if isinstance(v, (list, tuple))
+    }
+
+
+def load_aliases(force: bool = False) -> bool:
+    """从数据文件刷新触发别名。返回 True=用的是数据文件。"""
+    try:
+        path = aliases_path()
+        if path.is_file():
+            stat = path.stat()
+            key = (stat.st_mtime, stat.st_size)
+            if not force and _ALIAS_CACHE.get("key") == key:
+                return True
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                _apply_aliases(data)
+                _ALIAS_CACHE["key"] = key
+                return True
+            logger.warning("[companion] trigger_aliases.json 不是对象，按空表处理")
+    except Exception:  # noqa: BLE001
+        logger.exception("[companion] 读取 trigger_aliases.json 失败，按空表处理")
+    if _ALIAS_CACHE.get("key") is not None:
+        _apply_aliases({})
+        _ALIAS_CACHE["key"] = None
+    return False
+
+
+def current_aliases() -> dict:
+    """当前生效的别名表（导出用，格式与 trigger_aliases.json 一致）。"""
+    load_aliases()
+    return {str(k): [str(y) for y in v] for k, v in _TRIGGER_ALIASES.items()}
+
+
+def save_aliases(aliases: dict) -> str:
+    """原子写入别名表并立即生效；返回落盘路径。"""
+    if not isinstance(aliases, dict):
+        raise ValueError("别名表必须是对象")
+    payload = {
+        str(k): [str(y) for y in v]
+        for k, v in aliases.items()
+        if isinstance(v, (list, tuple))
+    }
+    path = aliases_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=4),
+                   encoding="utf-8", newline="\n")
+    tmp.replace(path)
+    stat = path.stat()
+    _ALIAS_CACHE["key"] = (stat.st_mtime, stat.st_size)
+    _apply_aliases(payload)
+    return str(path)
+
+
+# 过泛触发词：命中率太高、误伤严重，直接忽略（实测「自己」几乎能匹配任何文本）
+_TOO_GENERIC_TRIGGERS = {"自己", "事情", "东西", "什么", "怎么", "时候", "一个"}
+
+
+def _expand_trigger(word: str) -> list:
+    """把一个触发词扩展成 [原词, *别名]，并过滤过泛词。"""
+    w = str(word or "").strip()
+    if not w or w in _TOO_GENERIC_TRIGGERS:
+        return []
+    load_aliases()
+    out = [w]
+    out.extend(_TRIGGER_ALIASES.get(w, ()))
+    return [x for x in out if x and x not in _TOO_GENERIC_TRIGGERS]
+
+
+def _extract_triggers(entry: dict) -> list:
+    """从条目里抠出触发词。tier2 是列表；tier1 是「聊到父母、家人、小时候时——」这种句子。"""
+    raw = entry.get("trigger") or entry.get("triggers") or []
+    if isinstance(raw, (list, tuple)):
+        words = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        s = str(raw).strip()
+        if not s:
+            words = []
+        else:
+            s = re.sub(r"^聊到", "", s)
+            s = re.sub(r"时——?$", "", s)
+            s = re.sub(r"[（(].*?[)）]", "", s)
+            words = [w.strip() for w in re.split(r"[、,，/；;]", s) if len(w.strip()) >= 2]
+    # 展开别名并去重
+    out = []
+    for w in words:
+        for x in _expand_trigger(w):
+            if x not in out:
+                out.append(x)
+    return out
+
+
+def load_locked_topics(favor_score: int) -> list:
+    """返回当前好感度下【未解锁】的 (title, 触发词) 列表。文件按 mtime 缓存。"""
+    try:
+        from pathlib import Path
+
+        from nekro_agent.core.os_env import OsEnv
+
+        root = Path(OsEnv.DATA_DIR)
+        mtimes = []
+        payloads = []
+        for rel in _TIER_FILES:
+            fp = root / rel
+            if not fp.is_file():
+                continue
+            mtimes.append(fp.stat().st_mtime)
+            payloads.append(json.loads(fp.read_text(encoding="utf-8")))
+        key = tuple(mtimes)
+        if _locked_cache.get("key") != key:
+            all_entries = []
+            for d in payloads:
+                for e in d.get("entries") or []:
+                    if isinstance(e, dict) and e.get("enabled", True):
+                        all_entries.append(e)
+            _locked_cache.update(key=key, data=all_entries)
+        locked = []
+        for e in _locked_cache.get("data") or []:
+            if int(e.get("min_favor") or 0) <= favor_score:
+                continue  # 已解锁
+            words = _extract_triggers(e)
+            if words:
+                locked.append((str(e.get("title") or e.get("id") or "?"), words))
+        return locked
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[private_companion] 读取未解锁话题失败: {e!r}")
+        return []
+
+
+def match_locked(text: str, locked: list) -> str:
+    """文本是否触及未解锁话题；返回命中的话题名，未命中返回空串。"""
+    s = str(text or "")
+    if not s:
+        return ""
+    for title, words in locked:
+        for w in words:
+            if w and w in s:
+                return title
+    return ""
+
+
+async def get_favor_score(user_id: str) -> int:
+    """读取该用户私聊频道的好感度；读不到按 0（最保守，锁得最多）。"""
+    try:
+        from nekro_agent.models.db_plugin_data import DBPluginData
+
+        chat_key = core.private_chat_key(str(user_id))
+        row = await DBPluginData.get_or_none(
+            plugin_key="NTidal.nekro_persona",
+            data_key="favorability_state",
+            target_chat_key=chat_key,
+        )
+        if not row:
+            return 0
+        d = json.loads(row.data_value or "{}")
+        prof = (d.get("profiles") or {}).get(str(user_id))
+        return int(prof.get("score", 0)) if isinstance(prof, dict) else 0
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[private_companion] 读取好感度失败: {e!r}")
+        return 0
+
+
 # ============ 动机选择（本地规则，不调 LLM） ============
 
 
@@ -242,12 +441,40 @@ async def pick_motivation(user_id: str, user_state: dict, bot_state: dict) -> di
         "desc": f"没什么特别的事，就是想到 TA 了，想看看 TA 在干嘛{mood_hint}",
     })
 
+    # 好感度门控：跳过会触及未解锁话题的动机
+    favor = await get_favor_score(user_id)
+    locked = load_locked_topics(favor)
+    if locked:
+        logger.debug(
+            f"[private_companion] 好感度 {favor}，未解锁话题 {len(locked)} 条: "
+            f"{[t for t, _ in locked]}",
+        )
+
     # 避开最近 3 个话题类型
     recent = [str(x) for x in (user_state.get("recent_topics") or [])][-3:]
+    fallback = None
     for c in candidates:
-        if c["kind"] not in recent:
-            return c
-    return candidates[-1]
+        if c["kind"] in recent:
+            continue
+        hit = match_locked(c.get("desc", ""), locked)
+        if hit:
+            logger.info(
+                f"[private_companion] 动机 {c['kind']} 触及未解锁话题「{hit}」"
+                f"（好感度 {favor}），跳过",
+            )
+            continue
+        return c
+    # 全部候选都被避开/被锁：退到最泛化的兜底，绝不返回被锁的动机
+    for c in candidates:
+        if c["kind"] == "miss_you" and not match_locked(c.get("desc", ""), locked):
+            fallback = c
+            break
+    if fallback:
+        return fallback
+    return {
+        "kind": "miss_you",
+        "desc": f"没什么特别的事，就是想到 TA 了，想看看 TA 在干嘛{mood_hint}",
+    }
 
 
 # ============ 触发主动陪伴 ============
@@ -312,9 +539,7 @@ async def scheduler_loop() -> None:
             # 2. 状态自然衰减
             if tick_state_decay(bot_state):
                 await core.save_bot_state(bot_state)
-            # 3. 到点写日记
-            await maybe_generate_diary_by_time()
-            # 3b. 补发失败的主动唤醒
+            # 3. 补发失败的主动唤醒
             q = await core.get_proactive_queue()
             item = pq.pop_due(q, core.now_ts())
             await core.save_proactive_queue(q)

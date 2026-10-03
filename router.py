@@ -8,33 +8,20 @@ import inspect
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import core
 from .plugin import get_config, plugin
-from .selfie_draw import generate_image_with_configured_provider as _generate_image_with_configured_provider
 from .proactive import pick_motivation, should_send, trigger_proactive
 from .state import (
     build_inject_text,
     ensure_daily_state,
     generate_daily_plan,
-    generate_diary,
     generate_dream,
     generate_today_state,
     current_plan_event,
-)
-from .visuals import (
-    PersonaVisualProfile,
-    get_or_generate_daily_schedule_selfies,
-    get_or_generate_schedule_selfie,
-    is_safe_relative_image_path,
-    list_daily_schedule_selfie_status,
-    load_persona_visual_profile,
-    resolve_safe_image_path,
-    save_persona_image_bytes,
-    save_persona_visual_profile,
 )
 # ========== 请求模型 ==========
 
@@ -47,18 +34,13 @@ class UserUpdateRequest(BaseModel):
 
 
 class RegenerateRequest(BaseModel):
-    target: str = Field(..., description="plan | state | dream | diary")
+    target: str = Field(..., description="plan | state | dream")
+    min_segments: Optional[int] = Field(None, description="仅 plan：临时覆盖日程时段数下限（3-16），留空用插件配置")
+    max_segments: Optional[int] = Field(None, description="仅 plan：临时覆盖日程时段数上限（3-20），留空用插件配置")
 
 
 class ProactiveTestRequest(BaseModel):
     user_id: str = Field(..., description="陪伴对象 QQ")
-
-
-class VisualProfileRequest(BaseModel):
-    character_prompt: str = Field("", description="角色外貌提示词")
-    negative_prompt: str = Field("", description="负面提示词")
-    style_prompt: str = Field("", description="画风提示词")
-    seed_hint: str = Field("", description="可选 seed/一致性提示")
 
 
 # ========== 工具 ==========
@@ -89,38 +71,6 @@ def _disabled_response() -> Optional[JSONResponse]:
     if not enabled:
         return JSONResponse(status_code=503, content={"error": "插件已禁用"})
     return None
-
-
-def _visuals_base_dir() -> Path:
-    return Path(str(plugin.get_plugin_data_dir()))
-
-
-def _profile_to_api(profile: PersonaVisualProfile) -> dict:
-    data = profile.to_dict()
-    data["has_reference_image"] = bool(data.get("reference_image") and (_visuals_base_dir() / data["reference_image"]).exists())
-    return data
-
-
-def _apply_config_defaults(profile: PersonaVisualProfile) -> PersonaVisualProfile:
-    cfg = get_config()
-    if not profile.character_prompt.strip() and cfg.PERSONA_VISUAL_PROMPT.strip():
-        profile.character_prompt = cfg.PERSONA_VISUAL_PROMPT.strip()
-    if not profile.negative_prompt.strip() and cfg.PERSONA_NEGATIVE_PROMPT.strip():
-        profile.negative_prompt = cfg.PERSONA_NEGATIVE_PROMPT.strip()
-    return profile
-
-
-async def _check_and_increment_selfie_quota() -> tuple[bool, dict]:
-    cfg = get_config()
-    key = f"visuals_selfie_usage_{core.today_key()}"
-    usage = await core.get_json(key, {"date": core.today_key(), "count": 0})
-    if not isinstance(usage, dict):
-        usage = {"date": core.today_key(), "count": 0}
-    if int(usage.get("count", 0)) >= int(cfg.SELFIE_DAILY_LIMIT):
-        return False, usage
-    usage["count"] = int(usage.get("count", 0)) + 1
-    await core.set_json(key, usage)
-    return True, usage
 
 
 # ========== 路由 ==========
@@ -271,13 +221,15 @@ def create_router() -> APIRouter:
             return resp
         try:
             if req.target == "plan":
-                result = await generate_daily_plan(force=True)
+                result = await generate_daily_plan(
+                    force=True,
+                    min_segments=req.min_segments,
+                    max_segments=req.max_segments,
+                )
             elif req.target == "state":
                 result = await generate_today_state(force=True)
             elif req.target == "dream":
                 result = await generate_dream()
-            elif req.target == "diary":
-                result = await generate_diary(force=True)
             else:
                 return {"error": f"未知目标: {req.target}"}
             return {"success": result is not None, "target": req.target, "result": result}
@@ -298,7 +250,7 @@ def create_router() -> APIRouter:
         except Exception as e:
             return {"error": str(e)}
 
-    # ---------- 注入预览 / 日记 ----------
+    # ---------- 注入预览 ----------
 
     @api_router.get("/api/inject-preview", summary="生活状态注入预览")
     async def api_inject_preview():
@@ -310,156 +262,374 @@ def create_router() -> APIRouter:
         except Exception as e:
             return {"error": str(e)}
 
-    @api_router.get("/api/diaries", summary="日记列表")
-    async def api_diaries():
+    # ---------- 人设包：整套陪伴人设的导入 / 导出 ----------
+    # 角色内容（世界观 / 场景池 / 事件池 / 触发别名）全部存插件数据目录：
+    #   world_stage.txt、day_card.json、trigger_aliases.json
+    # 这三个文件的格式与导出包里的 companion/* 完全一致，所以
+    # 导出=读文件打包；导入=校验后写回文件（失败整体回滚）。均不再改写 .py 源码。
+
+    def _plugin_dir() -> Path:
+        return Path(__file__).parent
+
+    def _backup_root() -> Path:
+        try:
+            from nekro_agent.core.os_env import OsEnv
+
+            root = Path(OsEnv.DATA_DIR) / "plugin_data" / "xiaojiu.private_companion" / "companion_backups"
+        except Exception:  # noqa: BLE001
+            root = _plugin_dir() / "_companion_backups"
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _collect_content() -> dict:
+        """把当前生效的角色内容读成纯数据。"""
+        from . import day_card as _dc
+        from . import proactive as _pa
+
+        card = _dc.current_card()
+        return {
+            "world_stage": core.load_world_stage(),
+            "cooldown_days": card["cooldown_days"],
+            "scenes": card["scenes"],
+            "events": card["events"],
+            "trigger_aliases": _pa.current_aliases(),
+        }
+
+    def _py_literal(obj) -> str:
+        import json as _json
+
+        return _json.dumps(obj, ensure_ascii=False, indent=4)
+
+    @api_router.get("/api/backup/export", summary="导出整套陪伴人设（zip）")
+    async def api_backup_export():
         resp = _disabled_response()
         if resp:
             return resp
+        import io as _io
+        import zipfile as _zipfile
+        from datetime import datetime as _dt
+
+        from fastapi.responses import Response as _Resp
+
         try:
-            bot_state = await ensure_daily_state()
-            return bot_state.get("diaries") or []
-        except Exception as e:
+            data = _collect_content()
+            cfg = get_config()
+            buf = _io.BytesIO()
+            stamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+            meta = {
+                "bundle_version": 1,
+                "plugin": "xiaojiu.private_companion",
+                "version": str(getattr(plugin, "version", "") or ""),
+                "exported_at": _dt.now().isoformat(timespec="seconds"),
+                "character_hint": (data["world_stage"][:60] + "…") if data["world_stage"] else "",
+                "counts": {
+                    "world_stage_chars": len(data["world_stage"]),
+                    "scenes": len(data["scenes"]),
+                    "events": len(data["events"]),
+                    "trigger_aliases": len(data["trigger_aliases"]),
+                },
+            }
+            with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("companion/world_stage.txt", data["world_stage"])
+                zf.writestr(
+                    "companion/day_card.json",
+                    _py_literal(
+                        {
+                            "cooldown_days": data["cooldown_days"],
+                            "scenes": data["scenes"],
+                            "events": data["events"],
+                        }
+                    ),
+                )
+                zf.writestr("companion/trigger_aliases.json", _py_literal(data["trigger_aliases"]))
+                zf.writestr(
+                    "companion/config.json",
+                    _py_literal(
+                        {
+                            "PERSONA_PRESET_ID": str(getattr(cfg, "PERSONA_PRESET_ID", "") or ""),
+                            "PERSONA_PROMPT": str(getattr(cfg, "PERSONA_PROMPT", "") or ""),
+                            "PLAN_STYLE_HINT": str(getattr(cfg, "PLAN_STYLE_HINT", "") or ""),
+                        }
+                    ),
+                )
+                zf.writestr("companion.bundle.json", _py_literal(meta))
+            payload = buf.getvalue()
+            return _Resp(
+                content=payload,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="companion_bundle_{stamp}.zip"'
+                },
+            )
+        except Exception as e:  # noqa: BLE001
             return {"error": str(e)}
 
-    # ---------- 视觉资产 / 日程自拍 ----------
-
-    @api_router.get("/api/visuals/profile", summary="读取视觉人设")
-    async def api_visuals_profile():
+    @api_router.post("/api/backup/import", summary="导入整套陪伴人设（zip）")
+    async def api_backup_import(request: Request):
         resp = _disabled_response()
         if resp:
             return resp
-        cfg = get_config()
-        if not cfg.VISUALS_ENABLED:
-            return JSONResponse(status_code=503, content={"error": "视觉资产功能未启用"})
-        profile = _apply_config_defaults(load_persona_visual_profile(_visuals_base_dir()))
-        return _profile_to_api(profile)
+        import io as _io
+        import json as _json
+        import shutil as _shutil
+        import zipfile as _zipfile
+        from datetime import datetime as _dt
 
-    @api_router.post("/api/visuals/profile", summary="保存视觉人设")
-    async def api_visuals_save_profile(req: VisualProfileRequest):
-        resp = _disabled_response()
-        if resp:
-            return resp
-        cfg = get_config()
-        if not cfg.VISUALS_ENABLED:
-            return JSONResponse(status_code=503, content={"error": "视觉资产功能未启用"})
-        profile = load_persona_visual_profile(_visuals_base_dir())
-        profile.character_prompt = " ".join(req.character_prompt.split())[:2000]
-        profile.negative_prompt = " ".join((req.negative_prompt or cfg.PERSONA_NEGATIVE_PROMPT).split())[:1000]
-        profile.style_prompt = " ".join(req.style_prompt.split())[:1000]
-        profile.seed_hint = " ".join(req.seed_hint.split())[:200]
-        save_persona_visual_profile(_visuals_base_dir(), profile)
-        return _profile_to_api(profile)
-
-    @api_router.post("/api/visuals/persona-image", summary="上传/替换人设参考图")
-    async def api_visuals_persona_image(file: UploadFile = File(...)):
-        resp = _disabled_response()
-        if resp:
-            return resp
-        cfg = get_config()
-        if not cfg.VISUALS_ENABLED:
-            return JSONResponse(status_code=503, content={"error": "视觉资产功能未启用"})
-        content = await file.read()
+        body = await request.body()
+        if not body:
+            return {"error": "没有收到文件内容"}
         try:
-            profile = save_persona_image_bytes(_visuals_base_dir(), content, filename=file.filename or "persona.png")
+            zf = _zipfile.ZipFile(_io.BytesIO(body))
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"不是有效的 zip 包：{e}"}
+        names = set(zf.namelist())
+
+        def _pick(arc: str):
+            for cand in (f"companion/{arc}", arc):
+                if cand in names:
+                    return cand
+            return None
+
+        try:
+            # ---- 解析与校验（任何一项不合法都整体拒绝）----
+            ws = ""
+            ws_src = _pick("world_stage.txt")
+            if ws_src:
+                ws = zf.read(ws_src).decode("utf-8")
+            card = None
+            card_src = _pick("day_card.json")
+            if card_src:
+                card = _json.loads(zf.read(card_src).decode("utf-8"))
+                if not isinstance(card, dict) or not isinstance(card.get("scenes"), list) \
+                        or not isinstance(card.get("events"), list):
+                    return {"error": "day_card.json 结构不对（需要 scenes / events 数组）"}
+                for key in ("scenes", "events"):
+                    for item in card[key]:
+                        if not isinstance(item, dict) or not item.get("id"):
+                            return {"error": f"day_card.json 的 {key} 里有条目缺少 id"}
+            aliases = None
+            al_src = _pick("trigger_aliases.json")
+            if al_src:
+                aliases = _json.loads(zf.read(al_src).decode("utf-8"))
+                if not isinstance(aliases, dict):
+                    return {"error": "trigger_aliases.json 结构不对（需要对象）"}
+            if not ws and card is None and aliases is None:
+                return {"error": "包里没有可导入的人设内容（world_stage.txt / day_card.json / trigger_aliases.json）"}
+
+            # ---- 备份当前数据文件 ----
+            stamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+            bdir = _backup_root() / stamp
+            bdir.mkdir(parents=True, exist_ok=True)
+            from . import day_card as _dc_mod
+            from . import proactive as _pa_mod
+
+            paths = {
+                "world_stage.txt": core.world_stage_path(),
+                "day_card.json": _dc_mod.card_path(),
+                "trigger_aliases.json": _pa_mod.aliases_path(),
+            }
+            for key, path in paths.items():
+                if path.is_file():
+                    _shutil.copy2(path, bdir / key)
+
+            # ---- 落盘（失败则整体回滚到备份；原本不存在的删掉）----
+            written = []
+            try:
+                if ws.strip():
+                    core.save_world_stage(ws)
+                    written.append("world_stage.txt")
+                if card is not None:
+                    _dc_mod.save_card({
+                        "cooldown_days": int(card.get("cooldown_days") or _dc_mod.COOLDOWN_DAYS or 7),
+                        "scenes": card["scenes"],
+                        "events": card["events"],
+                    })
+                    written.append("day_card.json")
+                if aliases is not None:
+                    _pa_mod.save_aliases(aliases)
+                    written.append("trigger_aliases.json")
+            except Exception:
+                for key in written:
+                    bak = bdir / key
+                    if bak.is_file():
+                        _shutil.copy2(bak, paths[key])
+                    else:
+                        paths[key].unlink(missing_ok=True)
+                raise
+
+            # 三个数据文件都按 (mtime, size) 缓存，落盘即生效，无需 reload 模块
+            reloaded, reload_err = list(written), ""
+
+            # ---- 可选：同步陪伴人格文本 ----
+            cfg_applied = []
+            cfg_src = _pick("config.json")
+            if cfg_src:
+                try:
+                    cdata = _json.loads(zf.read(cfg_src).decode("utf-8"))
+                    cfg = get_config()
+                    for key in ("PERSONA_PRESET_ID", "PERSONA_PROMPT", "PLAN_STYLE_HINT"):
+                        val = str(cdata.get(key) or "")
+                        if val.strip():
+                            setattr(cfg, key, val)
+                            cfg_applied.append(key)
+                    if cfg_applied:
+                        plugin.save_config(cfg)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            return {
+                "success": True,
+                "applied": written,
+                "reloaded": reloaded,
+                "config_applied": cfg_applied,
+                "backup_dir": str(bdir),
+                "reload_error": reload_err,
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"error": str(e)}
+
+    # ---------- 角色内容挂载：WORLD_STAGE / 场景池 / 事件池 ----------
+
+    def _content_backup_root() -> Path:
+        try:
+            from nekro_agent.core.os_env import OsEnv
+
+            root = Path(OsEnv.DATA_DIR) / "plugin_data" / "xiaojiu.private_companion" / "content_backups"
+        except Exception:  # noqa: BLE001
+            root = Path(__file__).parent / "_content_backups"
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _read_content() -> dict:
+        from . import core as _core
+        from . import day_card as _dc
+
+        card = _dc.current_card()
+        return {
+            "world_stage": _core.load_world_stage(),
+            "cooldown_days": card["cooldown_days"],
+            "scenes": card["scenes"],
+            "events": card["events"],
+        }
+
+    def _py_literal(obj) -> str:
+        import json as _json
+
+        return _json.dumps(obj, ensure_ascii=False, indent=4)
+
+    def _validate_pool(items, kind: str) -> list:
+        if not isinstance(items, list):
+            raise ValueError(f"{kind} 必须是数组")
+        out, ids = [], set()
+        for it in items:
+            if not isinstance(it, dict):
+                raise ValueError(f"{kind} 里有非对象条目")
+            entry = {
+                "id": str(it.get("id") or "").strip()[:48],
+                ("title" if kind == "SCENES" else "blurb"): str(
+                    it.get("title") if kind == "SCENES" else it.get("blurb") or ""
+                ).strip()[:120],
+            }
+            if kind == "SCENES":
+                entry["setting"] = str(it.get("setting") or "").strip()[:600]
+            if not entry["id"]:
+                raise ValueError(f"{kind} 里有条目缺少 id")
+            if entry["id"] in ids:
+                raise ValueError(f"{kind} 里 id 重复：{entry['id']}")
+            ids.add(entry["id"])
+            if kind == "SCENES" and not entry["setting"]:
+                raise ValueError(f"场景 {entry['id']} 缺少 setting 描述")
+            if kind == "EVENTS" and not entry["blurb"]:
+                raise ValueError(f"事件 {entry['id']} 缺少 blurb 描述")
+            out.append(entry)
+        if not out:
+            raise ValueError(f"{kind} 不能为空")
+        return out
+
+    @api_router.get("/api/content", summary="角色内容（世界观 + 场景池 + 事件池）")
+    async def api_content_get():
+        resp = _disabled_response()
+        if resp:
+            return resp
+        try:
+            return {"content": _read_content()}
+        except Exception as e:  # noqa: BLE001
+            return {"error": str(e)}
+
+    @api_router.post("/api/content/world", summary="保存世界观舞台")
+    async def api_content_world(request: Request):
+        resp = _disabled_response()
+        if resp:
+            return resp
+        import shutil as _shutil
+        from datetime import datetime as _dt
+        try:
+            body = await request.json()
+            ws = str(body.get("world_stage") or "").strip()
+            if not ws:
+                return {"error": "世界观文本不能为空"}
+            if len(ws) > 4000:
+                return {"error": "世界观文本超过 4000 字上限"}
+            stamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+            bdir = _content_backup_root() / stamp
+            bdir.mkdir(parents=True, exist_ok=True)
+            old_fp = core.world_stage_path()
+            if old_fp.is_file():
+                _shutil.copy2(old_fp, bdir / "world_stage.txt")
+            path = core.save_world_stage(ws)
+            # 数据文件按 mtime 缓存，落盘即生效，无需 reload 模块
+            return {
+                "success": True,
+                "persisted": True,
+                "reloaded": True,
+                "path": path,
+                "backup_dir": str(bdir),
+                "chars": len(ws),
+            }
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        return _profile_to_api(profile)
+            return {"error": str(e)}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"保存失败：{e}"}
 
-    @api_router.post("/api/visuals/generate-current", summary="生成/读取当前日程自拍")
-    async def api_visuals_generate_current(force: bool = False):
+    @api_router.post("/api/content/pool", summary="保存场景池或事件池")
+    async def api_content_pool(request: Request):
         resp = _disabled_response()
         if resp:
             return resp
-        cfg = get_config()
-        if not (cfg.VISUALS_ENABLED and cfg.SELFIE_ENABLED):
-            return JSONResponse(status_code=503, content={"error": "视觉资产或自拍生成功能未启用"})
-        bot_state = await ensure_daily_state()
-        event = current_plan_event(bot_state) or {}
-        if not event:
-            return JSONResponse(status_code=400, content={"error": "当前没有可用日程事件"})
-        ok, usage = await _check_and_increment_selfie_quota()
-        if force and not ok:
-            return JSONResponse(status_code=429, content={"error": "今日自拍生成额度已用完", "usage": usage})
-        profile = _apply_config_defaults(load_persona_visual_profile(_visuals_base_dir()))
+        import shutil as _shutil
+        from datetime import datetime as _dt
         try:
-            image_path = await get_or_generate_schedule_selfie(
-                _visuals_base_dir(),
-                event,
-                bot_state.get("state") or {},
-                profile,
-                date_key=bot_state.get("date") or core.today_key(),
-                generator=_generate_image_with_configured_provider,
-                hhmm=core.hhmm_now(),
-                force=force,
-                retries=cfg.SELFIE_RETRIES,
-                retry_delay=cfg.SELFIE_RETRY_DELAY_SECONDS,
-            )
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": f"自拍生成失败: {str(e)[:160]}"})
-        rel = image_path.relative_to(_visuals_base_dir()).as_posix()
-        return {"success": True, "image": rel, "image_url": f"api/visuals/image/{rel}", "event": event, "usage": usage}
+            body = await request.json()
+            kind = str(body.get("kind") or "").upper()
+            if kind not in ("SCENES", "EVENTS"):
+                return {"error": "kind 必须是 SCENES 或 EVENTS"}
+            items = _validate_pool(body.get("items"), kind)
+            from . import day_card as _dc_mod
 
-    @api_router.get("/api/visuals/schedule-selfies", summary="列出今日日程自拍状态")
-    async def api_visuals_schedule_selfies():
-        resp = _disabled_response()
-        if resp:
-            return resp
-        cfg = get_config()
-        if not cfg.VISUALS_ENABLED:
-            return JSONResponse(status_code=503, content={"error": "视觉资产功能未启用"})
-        bot_state = await ensure_daily_state()
-        events = bot_state.get("plan", {}).get("events", [])
-        if not isinstance(events, list):
-            events = []
-        date_key = bot_state.get("date") or core.today_key()
-        items = list_daily_schedule_selfie_status(_visuals_base_dir(), events, date_key)
-        return {"success": True, "date": date_key, "items": items, "total": len(items), "generated": sum(1 for x in items if x.get("exists"))}
-
-    @api_router.post("/api/visuals/generate-day", summary="生成/读取今日全部日程自拍")
-    async def api_visuals_generate_day(force: bool = False):
-        resp = _disabled_response()
-        if resp:
-            return resp
-        cfg = get_config()
-        if not (cfg.VISUALS_ENABLED and cfg.SELFIE_ENABLED):
-            return JSONResponse(status_code=503, content={"error": "视觉资产或自拍生成功能未启用"})
-        bot_state = await ensure_daily_state()
-        events = bot_state.get("plan", {}).get("events", [])
-        if not isinstance(events, list) or not events:
-            return JSONResponse(status_code=400, content={"error": "今日没有可用日程事件"})
-        date_key = bot_state.get("date") or core.today_key()
-        profile = _apply_config_defaults(load_persona_visual_profile(_visuals_base_dir()))
-        try:
-            items = await get_or_generate_daily_schedule_selfies(
-                _visuals_base_dir(),
-                events,
-                bot_state.get("state") or {},
-                profile,
-                date_key=date_key,
-                generator=_generate_image_with_configured_provider,
-                force=force,
-                retries=cfg.SELFIE_RETRIES,
-                retry_delay=cfg.SELFIE_RETRY_DELAY_SECONDS,
-                limit=24,
-            )
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": f"今日日程自拍生成失败: {str(e)[:180]}"})
-        return {"success": True, "date": date_key, "items": items, "total": len(items), "generated": sum(1 for x in items if x.get("exists"))}
-
-    @api_router.get("/api/visuals/image/{rel_path:path}", summary="读取视觉图片")
-    async def api_visuals_image(rel_path: str):
-        resp = _disabled_response()
-        if resp:
-            return resp
-        if not is_safe_relative_image_path(rel_path):
-            raise HTTPException(status_code=403, detail="unsafe image path")
-        try:
-            target = resolve_safe_image_path(_visuals_base_dir(), rel_path)
+            cur = _dc_mod.current_card()
+            if kind == "SCENES":
+                cur["scenes"] = items
+            else:
+                cur["events"] = items
+            stamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+            bdir = _content_backup_root() / stamp
+            bdir.mkdir(parents=True, exist_ok=True)
+            old_fp = _dc_mod.card_path()
+            if old_fp.is_file():
+                _shutil.copy2(old_fp, bdir / "day_card.json")
+            path = _dc_mod.save_card(cur)
+            return {
+                "success": True,
+                "persisted": True,
+                "reloaded": True,
+                "path": path,
+                "backup_dir": str(bdir),
+                "count": len(items),
+            }
         except ValueError as e:
-            raise HTTPException(status_code=403, detail=str(e)) from e
-        if not target.exists():
-            raise HTTPException(status_code=404, detail="image not found")
-        return FileResponse(str(target), headers={"Cache-Control": "no-cache"})
+            return {"error": str(e)}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"保存失败：{e}"}
 
     router.include_router(api_router)
     return router

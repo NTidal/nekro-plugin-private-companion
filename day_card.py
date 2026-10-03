@@ -2,67 +2,134 @@
 """Daily life-card drawer: vary LLM daily plans with a scene + two events."""
 from __future__ import annotations
 
+import json
 import random
+from pathlib import Path
 from typing import Any, Optional
 
-COOLDOWN_DAYS = 7
+from nekro_agent.api.core import logger
 
-SCENES: list[dict[str, str]] = [
-    {
-        "id": "rainy_home",
-        "title": "下雨困在家",
-        "setting": "一整天都出不去，窗外一直下雨，屋里潮潮的只能窝着。",
-    },
-    {
-        "id": "friend_city",
-        "title": "去同学城市玩一天",
-        "setting": "坐车去同学所在的城市晃一天，路线陌生，时间被交通和见面占满。",
-    },
-    {
-        "id": "all_nighter",
-        "title": "通宵后的废日",
-        "setting": "昨晚几乎没睡，白天脑子发木，日程只能是低强度的残局。",
-    },
-    {
-        "id": "club_rehearsal",
-        "title": "社团彩排",
-        "setting": "大半天耗在排练室，灯光、队形和反复走位把时间切碎。",
-    },
-    {
-        "id": "exam_week",
-        "title": "考试周",
-        "setting": "教室、图书馆、复习资料轮转，心情紧，空档也围着考试转。",
-    },
-    {
-        "id": "weekend_market",
-        "title": "周末赶集",
-        "setting": "早起去市集或夜市逛摊，人多、东西杂，一天被逛和吃填满。",
-    },
-    {
-        "id": "sick_day",
-        "title": "生病躺床",
-        "setting": "发烧或感冒躺着，几乎不出门，行动半径只剩床和热水。",
-    },
-    {
-        "id": "overnight_train",
-        "title": "夜车赶路",
-        "setting": "坐夜车或过夜大巴赶路，白天是车厢、站台和迟到的困倦。",
-    },
-]
+_DATA_REL = ("plugin_data", "xiaojiu.private_companion", "day_card.json")
+_DEFAULT_COOLDOWN = 7
+_CACHE: dict = {"key": None}
 
-EVENTS: list[dict[str, str]] = [
-    {"id": "lost_parcel", "blurb": "快递丢了"},
-    {"id": "power_cut", "blurb": "突然停电"},
-    {"id": "friend_cancel", "blurb": "朋友放鸽子"},
-    {"id": "old_photo", "blurb": "捡到旧照片"},
-    {"id": "neighbor_noise", "blurb": "邻居装修"},
-    {"id": "extra_shift", "blurb": "被拉去加班"},
-    {"id": "stray_cat", "blurb": "楼下出现一只猫"},
-    {"id": "group_project", "blurb": "小组作业爆了"},
-]
+# 数据文件缺失/损坏时的兜底场景池。刻意不绑定任何具体世界观
+# （不出现地名、学校、公司、交通工具），任何角色设定下都不会出戏；
+# 正常运行时数据文件才是唯一来源。
+_FALLBACK: dict = {
+    "cooldown_days": _DEFAULT_COOLDOWN,
+    "scenes": [
+        {"id": "ordinary_day", "title": "平常的一天",
+         "setting": "没什么特别安排的一天，按平时的作息过，事情不多不少。"},
+        {"id": "busy_day", "title": "忙碌的一天",
+         "setting": "事情排得比平时满，来回奔波，只有零星空档。"},
+        {"id": "quiet_day", "title": "安静的一天",
+         "setting": "没什么人打扰，一个人安安静静地待着。"},
+        {"id": "outdoor_day", "title": "在外面的一天",
+         "setting": "在外面待了大半天，走走看看，时间过得很快。"},
+        {"id": "tired_day", "title": "疲惫的一天",
+         "setting": "状态不太好，做什么都提不起劲，早早就歇下了。"},
+        {"id": "good_day", "title": "顺遂的一天",
+         "setting": "事情办得比预想顺利，心情轻快，有余力搭理别的事。"},
+        {"id": "sick_day", "title": "生病躺床",
+         "setting": "身体不舒服，几乎不出门，行动半径只剩床和热水。"},
+        {"id": "visitor_day", "title": "有人来串门",
+         "setting": "有人来待了大半天，屋里热闹，时间在聊天和煮东西里过去。"},
+    ],
+    "events": [
+        {"id": "power_cut", "blurb": "停了一次电"},
+        {"id": "friend_cancel", "blurb": "约好的人临时来不了"},
+        {"id": "old_photo", "blurb": "翻出一张很久以前的旧照片"},
+        {"id": "stray_cat", "blurb": "附近出现一只不知从哪来的猫"},
+        {"id": "good_news", "blurb": "收到一个好消息"},
+        {"id": "small_gift", "blurb": "收到一份没预料到的小礼物"},
+        {"id": "found_lost", "blurb": "丢了很久的东西找回来了"},
+        {"id": "broken_thing", "blurb": "正在用的东西突然坏了，得从头查"},
+    ],
+}
 
-_SCENE_BY_ID = {s["id"]: s for s in SCENES}
-_EVENT_BY_ID = {e["id"]: e for e in EVENTS}
+# 当前生效的角色内容，由 load_card() 从数据文件刷新。
+# 保留模块级名字，本文件与 router、测试的既有调用方都不用改。
+COOLDOWN_DAYS: int = _DEFAULT_COOLDOWN
+SCENES: list[dict[str, str]] = []
+EVENTS: list[dict[str, str]] = []
+_SCENE_BY_ID: dict[str, dict[str, str]] = {}
+_EVENT_BY_ID: dict[str, dict[str, str]] = {}
+
+
+def card_path() -> Path:
+    """场景/事件池的数据文件路径（格式与导出包里的 companion/day_card.json 一致）。"""
+    from nekro_agent.core.os_env import OsEnv
+
+    return Path(OsEnv.DATA_DIR).joinpath(*_DATA_REL)
+
+
+def _apply(card: dict) -> None:
+    global COOLDOWN_DAYS, SCENES, EVENTS, _SCENE_BY_ID, _EVENT_BY_ID
+    COOLDOWN_DAYS = max(1, int(card.get("cooldown_days") or _DEFAULT_COOLDOWN))
+    SCENES = [dict(x) for x in (card.get("scenes") or [])]
+    EVENTS = [dict(x) for x in (card.get("events") or [])]
+    _SCENE_BY_ID = {s["id"]: s for s in SCENES}
+    _EVENT_BY_ID = {e["id"]: e for e in EVENTS}
+
+
+def load_card(force: bool = False) -> bool:
+    """从数据文件刷新角色内容。返回 True=用的是数据文件，False=兜底。"""
+    try:
+        path = card_path()
+        if path.is_file():
+            stat = path.stat()
+            key = (stat.st_mtime, stat.st_size)
+            if not force and _CACHE.get("key") == key:
+                return True
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data.get("scenes"), list) and data["scenes"] \
+                    and isinstance(data.get("events"), list) and data["events"]:
+                _apply(data)
+                _CACHE["key"] = key
+                return True
+            logger.warning("[companion] day_card.json 内容不完整，改用兜底场景池")
+    except Exception:  # noqa: BLE001
+        logger.exception("[companion] 读取 day_card.json 失败，改用兜底场景池")
+    if _CACHE.get("key") != "fallback":
+        _apply(_FALLBACK)
+        _CACHE["key"] = "fallback"
+    return False
+
+
+def current_card() -> dict:
+    """当前生效的角色内容（导出用，格式与 day_card.json 一致）。"""
+    load_card()
+    return {
+        "cooldown_days": COOLDOWN_DAYS,
+        "scenes": [dict(x) for x in SCENES],
+        "events": [dict(x) for x in EVENTS],
+    }
+
+
+def save_card(card: dict) -> str:
+    """原子写入角色内容并立即生效；返回落盘路径。"""
+    scenes = card.get("scenes")
+    events = card.get("events")
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("场景池不能为空")
+    if not isinstance(events, list) or not events:
+        raise ValueError("事件池不能为空")
+    payload = {
+        "cooldown_days": max(1, int(card.get("cooldown_days") or _DEFAULT_COOLDOWN)),
+        "scenes": [dict(x) for x in scenes],
+        "events": [dict(x) for x in events],
+    }
+    path = card_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=4),
+                   encoding="utf-8", newline="\n")
+    tmp.replace(path)
+    stat = path.stat()
+    _CACHE["key"] = (stat.st_mtime, stat.st_size)
+    _apply(payload)
+    return str(path)
 
 
 def empty_history() -> dict[str, list[str]]:
@@ -76,8 +143,11 @@ def _rng_for(date_key: str, rng: Optional[random.Random]) -> random.Random:
 
 
 def _pick_scene(history: dict, rng: random.Random) -> dict[str, str]:
+    load_card()
     recent = list(history.get("recent_scene_ids") or [])
     cooled = set(recent[-COOLDOWN_DAYS:])
+    if not SCENES:
+        return {"id": "unknown", "title": "平常的一天", "setting": "按平时的作息过一天。"}
     available = [s for s in SCENES if s["id"] not in cooled]
     if available:
         return rng.choice(available)
@@ -91,10 +161,13 @@ def _pick_scene(history: dict, rng: random.Random) -> dict[str, str]:
 
 
 def _pick_events(history: dict, rng: random.Random) -> list[dict[str, str]]:
+    load_card()
     recent = list(history.get("recent_event_ids") or [])
     cooled = set(recent[-14:])
     available = [e for e in EVENTS if e["id"] not in cooled]
     picked: list[dict[str, str]] = []
+    if not EVENTS:
+        return []
     pool = list(available)
     rng.shuffle(pool)
     for ev in pool:
